@@ -1,35 +1,15 @@
 #[macro_use]
-extern crate dotenv;
-#[macro_use]
 extern crate rocket;
-#[macro_use]
-extern crate serde_derive;
-extern crate log;
-extern crate tokio;
-
-#[macro_use]
-extern crate dotenv_codegen;
 
 use core::{panic, str};
-use std::borrow::{Borrow, BorrowMut};
-use std::iter;
-
-use dotenv::dotenv;
-use env_logger::init;
-use once_cell::sync::OnceCell;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-use rocket::data;
-use rocket::futures::stream::iter;
-use rocket::http::{ContentType, Status};
-use time::{Date, Duration, OffsetDateTime};
-
-extern crate cronjob;
 use cronjob::CronJob;
-
-use log::{debug, error, info, log_enabled, warn, Level};
-use serde_derive::Deserialize;
-use serde_derive::Serialize;
-use serde_json::Value;
+use dotenv::dotenv;
+use log::{debug, info, log_enabled, warn, Level};
+use once_cell::sync::OnceCell;
+use rocket::http::{ContentType, Status};
+use serde_derive::{Deserialize, Serialize};
+use std::borrow::{BorrowMut};
+use time::{Date};
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GitlabEvent {
@@ -200,6 +180,8 @@ fn on_cron(name: &str) {
 #[cfg(test)]
 mod tests {
 
+    use sqlx::SqlitePool;
+
     use super::*;
 
     #[tokio::test]
@@ -230,4 +212,15 @@ mod tests {
             .await;
         assert_eq!(result.len(), 4);
     }
+
+    #[tokio::test]
+    async fn some_sqlite_tests() {
+        dotenv().ok();
+
+        let pool = SqlitePool::connect("sqlite::memory:").await;
+
+        // TODO: Do this
+
+    }
+
 }
