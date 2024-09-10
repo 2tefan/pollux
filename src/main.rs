@@ -10,12 +10,14 @@ extern crate tokio;
 #[macro_use]
 extern crate dotenv_codegen;
 
-use core::str;
+use core::{panic, str};
 use std::borrow::Borrow;
 use std::iter;
 
 use dotenv::dotenv;
+use env_logger::init;
 use once_cell::sync::OnceCell;
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use rocket::data;
 use rocket::futures::stream::iter;
 use rocket::http::{ContentType, Status};
@@ -81,30 +83,68 @@ impl Gitlab {
         }
         info!("Getting events from Gitlab... ({})", url);
 
-        let res = client.get(url).bearer_auth(token).send().await;
+        let mut current_page = 1;
+        loop {
+            let res = client
+                .get(format!("{}&page={}", url, current_page))
+                .bearer_auth(token)
+                .send()
+                .await;
 
-        //String::from(res.unwrap().status().as_str())
-        let payload = match res {
-            Ok(res) => match res.text().await {
+            if (current_page > 10) {
+                panic!("h");
+            }
+            let initial_res = match res {
+                Ok(initial_response) => initial_response,
+                Err(err) => panic!("Unable to get response from Gitlab!"),
+            };
+
+            let header = initial_res.headers().clone();
+            let payload = match initial_res.text().await {
                 Ok(text) => text,
                 Err(err) => panic!("Unable to decode response from Gitlab: {}", err),
-            },
-            Err(err) => panic!("Unable to send request! {}", err),
-        };
-        println!("{:?}", payload); // GET HEADERS FOR PAGINATION!!
+            };
 
-        let data: Vec<GitlabEvent> = match serde_json::from_str(&payload) {
-            Ok(data) => data,
-            Err(err) => panic!(
-                "Unable to decode json response from Gitlab: {}\nThis is what we received:\n{}",
-                err, payload
-            ),
-        };
+            let total_pages = match header.get("x-total-pages") {
+                Some(x_total_pages) => x_total_pages
+                    .to_str()
+                    .expect("Unable to get string from header")
+                    .parse::<u32>()
+                    .expect("x-total is not a valid number!"),
+                None => panic!("Didn't got x-total header back from Gitlab!"),
+            };
 
-        for i in data {
-            println!("{:?}", i);
+            match header.get("x-page") {
+                Some(x_page) => {
+                    let gitlab_current_page = x_page
+                        .to_str()
+                        .expect("Unable to get string from header")
+                        .parse::<u32>()
+                        .expect("x-page is not a valid number!");
+                    assert_eq!(gitlab_current_page, current_page);
+                }
+                None => panic!("Didn't got x-page header back from Gitlab!"),
+            }
+
+            let data: Vec<GitlabEvent> = match serde_json::from_str(&payload) {
+                Ok(data) => data,
+                Err(err) => panic!(
+                    "Unable to decode json response from Gitlab: {}\nThis is what we received:\n{}",
+                    err, payload
+                ),
+            };
+            for i in data {
+                println!("{:?}", i);
+            }
+
+            println!("Lol {}/{}", current_page, total_pages);
+            if current_page >= total_pages {
+                break;
+            }
+            current_page += 1;
         }
-        //data.first().unwrap().project_id.to_string()
+        //String::from(res.unwrap().status().as_str())
+
         "hello".to_string()
     }
 }
@@ -164,7 +204,7 @@ mod tests {
         let result = gitlab
             .get_events(
                 time::macros::date!(2024 - 05 - 01),
-                time::macros::date!(2024 - 06 - 01), // (OffsetDateTime::now_utc() + Duration::days(-85)).date(),
+                time::macros::date!(2024 - 05 - 05), // (OffsetDateTime::now_utc() + Duration::days(-85)).date(),
             )
             .await;
         assert_eq!(result, OffsetDateTime::now_utc().date().to_string())
