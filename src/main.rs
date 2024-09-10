@@ -11,7 +11,7 @@ extern crate tokio;
 extern crate dotenv_codegen;
 
 use core::{panic, str};
-use std::borrow::Borrow;
+use std::borrow::{Borrow, BorrowMut};
 use std::iter;
 
 use dotenv::dotenv;
@@ -64,7 +64,7 @@ impl Gitlab {
         }
     }
 
-    pub async fn get_events(&self, after: Date, before: Date) -> String {
+    pub async fn get_events(&self, after: Date, before: Date) -> Vec<GitlabEvent> {
         let client = reqwest::Client::new();
         let token = &self.token;
         let user_id = &self.user_id;
@@ -83,6 +83,8 @@ impl Gitlab {
         }
         info!("Getting events from Gitlab... ({})", url);
 
+        let mut gitlab_events: Vec<GitlabEvent> = Vec::new();
+
         let mut current_page = 1;
         loop {
             let res = client
@@ -91,9 +93,6 @@ impl Gitlab {
                 .send()
                 .await;
 
-            if (current_page > 10) {
-                panic!("h");
-            }
             let initial_res = match res {
                 Ok(initial_response) => initial_response,
                 Err(err) => panic!("Unable to get response from Gitlab!"),
@@ -113,6 +112,9 @@ impl Gitlab {
                     .expect("x-total is not a valid number!"),
                 None => panic!("Didn't got x-total header back from Gitlab!"),
             };
+            if current_page == 1 && total_pages > 20 {
+                warn!("Getting more than 20 pages/400 events! [{}]", total_pages)
+            }
 
             match header.get("x-page") {
                 Some(x_page) => {
@@ -126,26 +128,30 @@ impl Gitlab {
                 None => panic!("Didn't got x-page header back from Gitlab!"),
             }
 
-            let data: Vec<GitlabEvent> = match serde_json::from_str(&payload) {
+            let mut data: Vec<GitlabEvent> = match serde_json::from_str(&payload) {
                 Ok(data) => data,
                 Err(err) => panic!(
                     "Unable to decode json response from Gitlab: {}\nThis is what we received:\n{}",
                     err, payload
                 ),
             };
-            for i in data {
-                println!("{:?}", i);
+
+            gitlab_events.append(data.borrow_mut());
+
+            if log_enabled!(Level::Debug) {
+                for element in data {
+                    debug!("{:?}", element);
+                }
+                debug!("This was page {} of {}", current_page, total_pages);
             }
 
-            println!("Lol {}/{}", current_page, total_pages);
             if current_page >= total_pages {
                 break;
             }
             current_page += 1;
         }
-        //String::from(res.unwrap().status().as_str())
 
-        "hello".to_string()
+        gitlab_events
     }
 }
 
@@ -157,13 +163,13 @@ async fn index() -> (Status, (ContentType, String)) {
     (
         Status::ImATeapot,
         (
-            ContentType::JSON,
-            Gitlab::global()
-                .get_events(
-                    (OffsetDateTime::now_utc() + Duration::days(-2)).date(),
-                    (OffsetDateTime::now_utc() + Duration::days(0)).date(),
-                )
-                .await,
+            ContentType::Text,
+            "Hello".to_string(), // Gitlab::global()
+                                 //     .get_events(
+                                 //         (OffsetDateTime::now_utc() + Duration::days(-2)).date(),
+                                 //         (OffsetDateTime::now_utc() + Duration::days(0)).date(),
+                                 //     )
+                                 //     .await,
         ),
     )
 }
@@ -207,6 +213,21 @@ mod tests {
                 time::macros::date!(2024 - 05 - 05), // (OffsetDateTime::now_utc() + Duration::days(-85)).date(),
             )
             .await;
-        assert_eq!(result, OffsetDateTime::now_utc().date().to_string())
+        //assert_eq!(result, OffsetDateTime::now_utc().date().to_string())
+        assert_eq!(result.len(), 31);
+    }
+
+    #[tokio::test]
+    async fn gitlab_api_is_still_sane_without_pagination() {
+        dotenv().ok();
+        let gitlab = Gitlab::from_env_vars();
+
+        let result = gitlab
+            .get_events(
+                time::macros::date!(2024 - 05 - 03),
+                time::macros::date!(2024 - 05 - 05), // (OffsetDateTime::now_utc() + Duration::days(-85)).date(),
+            )
+            .await;
+        assert_eq!(result.len(), 4);
     }
 }
