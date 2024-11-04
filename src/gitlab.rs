@@ -134,7 +134,6 @@ impl Gitlab {
 
 #[cfg(test)]
 mod tests {
-    use sqlx::SqlitePool;
     use dotenv::dotenv;
     use super::*;
 
@@ -165,16 +164,7 @@ mod tests {
                 time::macros::date!(2024 - 05 - 05), // (OffsetDateTime::now_utc() + Duration::days(-85)).date(),
             )
             .await;
+        println!("{:?}", result);
         assert_eq!(result.len(), 4);
-    }
-
-    #[tokio::test]
-    async fn some_sqlite_tests() {
-        dotenv().ok();
-
-        let pool = SqlitePool::connect("sqlite::memory:").await;
-
-        // TODO: Do this
-
     }
 }

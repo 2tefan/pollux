@@ -1,7 +1,10 @@
 #[macro_use]
 extern crate rocket;
 
+
 mod gitlab;
+mod database;
+
 
 use cronjob::CronJob;
 use dotenv::dotenv;
