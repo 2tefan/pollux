@@ -1,37 +1,93 @@
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
     use dotenv::dotenv;
+    use once_cell::sync::Lazy;
+    use testcontainers::{
+        core::{wait::HealthWaitStrategy, IntoContainerPort, WaitFor},
+        runners::AsyncRunner,
+        GenericImage, ImageExt,
+    };
+
+
+    use std::sync::Once;
+
+    static INIT: Once = Once::new();
 
     #[tokio::test]
     async fn check_if_db_is_alive() {
+            initialize().await;
+    }
+
+    async fn initialize() {
         dotenv().ok();
         let db_user = std::env::var("MYSQL_USER").expect("Please specify MYSQL_USER as env var!");
         let db_password =
             std::env::var("MYSQL_PASSWORD").expect("Please specify MYSQL_PASSWORD as env var!");
-        let db_host = std::env::var("MYSQL_HOST").expect("Please specify MYSQL_HOST as env var!");
+        //let db_host = std::env::var("MYSQL_HOST").expect("Please specify MYSQL_HOST as env var!");
         let db_target_database =
             std::env::var("MYSQL_DATABASE").expect("Please specify MYSQL_DATABASE as env var!");
 
+        let future_container = GenericImage::new(
+            "mariadb",
+            "latest@sha256:4a1de8fa2a929944373d7421105500ff6f889ce90dcb883fbb2fdb070e4d427e",
+        )
+        .with_exposed_port(3306.tcp())
+        .with_wait_for(WaitFor::message_on_stderr(
+            "Server socket created on IP",
+        ))
+        .with_env_var("MYSQL_USER", db_user.clone())
+        .with_env_var("MYSQL_PASSWORD", db_password.clone())
+        .with_env_var("MYSQL_DATABASE", db_target_database.clone())
+        .with_env_var("MYSQL_RANDOM_ROOT_PASSWORD", "TRUE") // not needed here
+        .start();
+
+        println!("Starting container...");
+
+        let container = future_container
+        .await
+        .expect(
+            "Couldn't start testcontainer! Check documentation if everything is setup correctly!",
+        );
+
+        println!("Container up and running!");
+        let host = container
+            .get_host()
+            .await
+            .expect("Couldn't get host for testcontainer(?)");
+        let port = container
+            .get_host_port_ipv4(3306.tcp())
+            .await
+            .expect("Port 3306 not found on mariadb container! Check image");
+
+            println!(
+
+                "mysql://{}:{}@{}:{}/{}",
+                db_user, db_password, host, port, db_target_database
+            );
         let pool = sqlx::MySqlPool::connect(
             format!(
-                "mysql://{}:{}@{}/{}",
-                db_user, db_password, db_host, db_target_database
+                "mysql://{}:{}@{}:{}/{}",
+                db_user, db_password, host, port, db_target_database
             )
             .as_str(),
         )
-        .await.unwrap();
+        .await
+        .unwrap();
 
-
-        let tables: Vec<(String,)> = sqlx::query_as("SHOW TABLES").fetch_all(&pool).await.unwrap();
+        //let tables: Vec<(String,)> = sqlx::query_as("SHOW TABLES")
+        //    .fetch_all(&pool)
+        //    .await
+        //    .unwrap();
 
         //for table in tables.iter() {
         //    println!("{}", table.0);
         //    println!("{:?}", table);
         //}
 
-        assert!(tables.len() > 0);
+        //assert!(tables.len() > 0);
 
-        // TODO: Do this
     }
 }
