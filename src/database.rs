@@ -36,13 +36,13 @@ mod tests {
         .with_env_var("MYSQL_RANDOM_ROOT_PASSWORD", "TRUE") // not needed here
         .start();
 
-        println!("Starting container...");
+        //println!("Starting container...");
 
         let container = future_container.await.expect(
             "Couldn't start testcontainer! Check documentation if everything is setup correctly!",
         );
 
-        println!("Container up and running!");
+        //println!("Container up and running!");
         let host = container
             .get_host()
             .await
@@ -52,10 +52,10 @@ mod tests {
             .await
             .expect("Port 3306 not found on mariadb container! Check image");
 
-        println!(
-            "mysql://{}:{}@{}:{}/{}",
-            db_user, db_password, host, port, db_target_database
-        );
+        //println!(
+        //    "mysql://{}:{}@{}:{}/{}",
+        //    db_user, db_password, host, port, db_target_database
+        //);
         let pool = sqlx::MySqlPool::connect(
             format!(
                 "mysql://{}:{}@{}:{}/{}",
@@ -82,19 +82,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_all_migrations() {
-        let (container, pool) = initialize().await;
-        println!("Testing...");
+    async fn do_tables_exists() {
+        let (_container, pool) = initialize().await;
         let tables: Vec<(String,)> = sqlx::query_as("SHOW TABLES")
             .fetch_all(&pool)
             .await
             .unwrap();
 
-        for table in tables.iter() {
-            println!("{}", table.0);
-            println!("{:?}", table);
-        }
+        // for table in tables.iter() {
+        //     println!("{}", table.0);
+        //     println!("{:?}", table);
+        // }
 
         assert!(tables.len() > 0);
+    }
+
+    #[tokio::test]
+    async fn run_migrations_twice() {
+        let (_container, pool) = initialize().await;
+
+        assert!(sqlx::migrate!().run(&pool).await.is_ok());
     }
 }
