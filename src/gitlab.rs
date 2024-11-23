@@ -1,4 +1,6 @@
-use std::borrow::BorrowMut;
+use crate::database;
+
+use std::borrow::{Borrow, BorrowMut};
 
 use log::{log_enabled, Level};
 use once_cell::sync::OnceCell;
@@ -129,13 +131,29 @@ impl Gitlab {
 
         gitlab_events
     }
-}
 
+    pub async fn insert_gitlab_events_into_db(&self, events: Vec<GitlabEvent>) {
+        let db = database::Database::get_or_init().await;
+        let pool = db.get_pool().await;
+
+        let tables: Vec<(String,)> = sqlx::query_as("SHOW TABLES")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+
+        for table in tables.iter() {
+            println!("{}", table.0);
+            println!("{:?}", table);
+        }
+
+        assert!(tables.len() > 0);
+    }
+}
 
 #[cfg(test)]
 mod tests {
-    use dotenv::dotenv;
     use super::*;
+    use dotenv::dotenv;
 
     #[tokio::test]
     async fn gitlab_api_is_still_sane() {
@@ -166,5 +184,21 @@ mod tests {
             .await;
         println!("{:?}", result);
         assert_eq!(result.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn test_todo() {
+        // Do something usefull
+        dotenv().ok();
+        Gitlab::get_or_init();
+        let gitlab = Gitlab::init_from_env_vars();
+
+        let events = gitlab
+            .get_events(
+                time::macros::date!(2024 - 05 - 03),
+                time::macros::date!(2024 - 05 - 05), // (OffsetDateTime::now_utc() + Duration::days(-85)).date(),
+            )
+            .await;
+        gitlab.insert_gitlab_events_into_db(events).await;
     }
 }

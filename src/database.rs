@@ -1,3 +1,50 @@
+use std::borrow::BorrowMut;
+
+use sqlx::{MySql, Pool};
+use tokio::sync::OnceCell;
+
+pub static DATABASE: OnceCell<Database> = OnceCell::const_new();
+pub(crate) struct Database {
+    pool: sqlx::MySqlPool,
+}
+
+impl Database {
+    pub async fn init_from_env_vars() -> Database {
+        let db_user = std::env::var("MYSQL_USER").expect("Please specify MYSQL_USER as env var!");
+        let db_password =
+            std::env::var("MYSQL_PASSWORD").expect("Please specify MYSQL_PASSWORD as env var!");
+        let db_host = std::env::var("MYSQL_HOST").expect("Please specify MYSQL_HOST as env var!");
+        let db_port = std::env::var("MYSQL_PORT").expect("Please specify MYSQL_PORT as env var!");
+        let db_target_database =
+            std::env::var("MYSQL_DATABASE").expect("Please specify MYSQL_DATABASE as env var!");
+
+        let pool = sqlx::MySqlPool::connect(
+            format!(
+                "mysql://{}:{}@{}:{}/{}",
+                db_user, db_password, db_host, db_port, db_target_database
+            )
+            .as_str(),
+        )
+        .await
+        .unwrap();
+
+        match sqlx::migrate!().run(&pool).await {
+            Ok(result) => result,
+            Err(err) => panic!("Couldn't run db migrations: {}", err),
+        }
+
+        Database { pool }
+    }
+
+    pub async fn get_or_init() -> &'static Database {
+        DATABASE.get_or_init(|| Self::init_from_env_vars()).await
+    }
+
+    pub async fn get_pool(&self) -> Pool<MySql> {
+        self.pool.clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -15,7 +62,10 @@ mod tests {
     use std::sync::Once;
     static INIT: Once = Once::new();
 
-    async fn initialize() -> (testcontainers::ContainerAsync<GenericImage>, sqlx::Pool<MySql>)  {
+    async fn initialize() -> (
+        testcontainers::ContainerAsync<GenericImage>,
+        sqlx::Pool<MySql>,
+    ) {
         dotenv().ok();
         let db_user = std::env::var("MYSQL_USER").expect("Please specify MYSQL_USER as env var!");
         let db_password =
