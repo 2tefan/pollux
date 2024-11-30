@@ -5,7 +5,9 @@ use std::borrow::{Borrow, BorrowMut};
 use chrono::{DateTime, Utc};
 use log::{error, log_enabled, trace, Level};
 use once_cell::sync::OnceCell;
+use rocket::futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
+use sqlx::{MySql, Row, Transaction};
 use time::Date;
 
 static GITLAB: OnceCell<Gitlab> = OnceCell::new();
@@ -25,10 +27,10 @@ pub struct PushData {
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GitlabProject {
-    pub id: u64,
+    pub id: i64,
     pub name_with_namespace: String,
     pub web_url: String,
-    pub visibility: String,
+    pub visibility: Option<String>,
 }
 
 #[derive(Debug)]
@@ -141,7 +143,7 @@ impl Gitlab {
         gitlab_events
     }
 
-    pub async fn get_project_details_by_id(&self, gitlab_project_id: u64) -> GitlabProject {
+    pub async fn get_project_details_by_id(&self, gitlab_project_id: i64) -> GitlabProject {
         let client = reqwest::Client::new();
         let token = &self.token;
         let user_id = &self.user_id;
@@ -170,6 +172,74 @@ impl Gitlab {
         }
     }
 
+    pub async fn fetch_single_gitlab_project_from_db(
+        tx: &mut Transaction<'static, MySql>,
+        project_id: i64,
+    ) -> Option<GitlabProject> {
+        let mut rows =
+            sqlx::query("SELECT gitlab_id, name, url FROM GitlabProjects WHERE gitlab_id = ?")
+                .bind(project_id)
+                .fetch(&mut **tx);
+
+        let mut number_of_projects = 0;
+        let mut gitlab_project = Option::None;
+        while let Some(row) = rows.try_next().await.unwrap() {
+            if number_of_projects > 0 {
+                error!(
+                    "There are more than 1x Gitlab projects in DB (id={}) - skipping this event!",
+                    project_id
+                );
+                return Option::None;
+            }
+
+            number_of_projects += 1;
+            let gitlab_id: i64 = row.try_get("gitlab_id").unwrap();
+            let name: &str = row.try_get("name").unwrap();
+            let url: &str = row.try_get("url").unwrap();
+            gitlab_project = Some(GitlabProject {
+                id: gitlab_id,
+                name_with_namespace: name.to_string(),
+                web_url: url.to_string(),
+                visibility: Option::None,
+            });
+        }
+
+        gitlab_project
+    }
+
+    async fn fetch_project_from_gitlab_and_write_to_db(
+        &self,
+        tx: &mut Transaction<'static, MySql>,
+        project_id: i64,
+    ) {
+        let gitlab_project = self.get_project_details_by_id(project_id).await;
+        let project_id =
+            sqlx::query("INSERT INTO GitlabProjects (gitlab_id, name, url) VALUES ( ? )")
+                .bind(gitlab_project.id)
+                .bind(gitlab_project.name_with_namespace)
+                .bind(gitlab_project.web_url)
+                .execute(&mut **tx)
+                .await
+                .unwrap()
+                .last_insert_id();
+        trace!("Inserted GitlabProject id: {}", project_id);
+    }
+
+    async fn insert_event(
+        &self,
+        tx: &mut Transaction<'static, MySql>,
+        datetime: DateTime<Utc>,
+    ) {
+            let event_id = sqlx::query("INSERT INTO Events (timestamp) VALUES ( ? )")
+                .bind(datetime.format("%Y-%m-%d %H:%M:%S").to_string())
+                .execute(&mut **tx)
+                .await
+                .unwrap()
+                .last_insert_id();
+            trace!("Inserted Gitlab event id: {} @ {}", event_id, datetime);
+            // return  event_id;
+    }
+
     pub async fn insert_gitlab_events_into_db(&self, events: Vec<GitlabEvent>) {
         let db = database::Database::get_or_init().await;
         let pool = db.get_pool().await;
@@ -185,7 +255,14 @@ impl Gitlab {
         }
 
         for event in events.iter() {
-            println!("{}", event.created_at);
+            // Starting transaction 💪
+            let mut tx = pool.begin().await.expect("Couldn't start transaction!");
+            let tx_ref = tx.borrow_mut();
+
+            // TODO: Maybe check if name is still up-to-date etc.
+            let gitlab_project_option =
+                Gitlab::fetch_single_gitlab_project_from_db(tx_ref, event.project_id);
+
             let datetime: DateTime<Utc> = match event.created_at.parse() {
                 Ok(datetime) => datetime,
                 Err(err) => {
@@ -195,20 +272,15 @@ impl Gitlab {
                 }
             };
 
-            // Starting transaction 💪
-            let mut tx = pool.begin().await.expect("Couldn't start transaction!");
+            // Inserting GitlabProject
+            // TODO fetching name + url from gitlab and insert it, if missing
+            if gitlab_project_option.await.is_none() {
+                self.fetch_project_from_gitlab_and_write_to_db(tx_ref, event.project_id).await;
+            }
 
             // Beginning with Event itself
-            let event_id = sqlx::query("INSERT INTO Events (timestamp) VALUES ( ? )")
-                .bind(datetime.format("%Y-%m-%d %H:%M:%S").to_string())
-                .execute(&mut *tx)
-                .await
-                .unwrap()
-                .last_insert_id();
-            trace!("Inserted Gitlab event id: {} @ {}", event_id, datetime);
+            self.insert_event(tx_ref, datetime).await;
 
-            // TODO fetching name + url from gitlab and insert it, if missing
-            // Inserting GitlabProject
             // let event_id = sqlx::query("INSERT INTO GitlabProjects (id, name, url) VALUES ( ? )")
             //     .bind(event.)
             //     .execute(&mut *tx)
@@ -273,7 +345,7 @@ mod tests {
                 id: 61345567,
                 name_with_namespace: "2tefan Projects / Stats / Pollux".to_string(),
                 web_url: "https://gitlab.com/2tefan-projects/stats/pollux".to_string(),
-                visibility: "public".to_string()
+                visibility: Some("public".to_string())
             }
         );
     }
@@ -290,6 +362,6 @@ mod tests {
                 time::macros::date!(2024 - 05 - 05), // (OffsetDateTime::now_utc() + Duration::days(-85)).date(),
             )
             .await;
-        gitlab.insert_gitlab_events_into_db(events).await;
+        gitlab.insert_gitlab_events_into_db(events).await; // TODO: Fix test
     }
 }
