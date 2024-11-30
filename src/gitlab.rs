@@ -2,7 +2,8 @@ use crate::database;
 
 use std::borrow::{Borrow, BorrowMut};
 
-use log::{log_enabled, Level};
+use chrono::{DateTime, Utc};
+use log::{error, log_enabled, trace, Level};
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use time::Date;
@@ -146,6 +147,43 @@ impl Gitlab {
             println!("{:?}", table);
         }
 
+        for event in events.iter() {
+            println!("{}", event.created_at);
+            let datetime: DateTime<Utc> = match event.created_at.parse() {
+                Ok(datetime) => datetime,
+                Err(err) => {
+                    // Parsing failed - https://docs.rs/chrono/latest/chrono/struct.DateTime.html#impl-FromStr-for-DateTime%3CUtc%3E
+                    error!("Couldn't parse date from Gitlab using a relaxed form of RFC3339. Event will be skipped! Received 'created_at' value: {} - error msg: {}", event.created_at, err);
+                    continue;
+                }
+            };
+
+            // Starting transaction 💪
+            let mut tx = pool.begin().await.expect("Couldn't start transaction!");
+
+            // Beginning with Event itself
+            let event_id = sqlx::query("INSERT INTO Events (timestamp) VALUES ( ? )")
+                .bind(datetime.format("%Y-%m-%d %H:%M:%S").to_string())
+                .execute(&mut *tx)
+                .await
+                .unwrap()
+                .last_insert_id();
+            trace!("Inserted Gitlab event id: {} @ {}", event_id, datetime);
+
+            // TODO fetching name + url from gitlab and insert it, if missing
+            // Inserting GitlabProject
+            // let event_id = sqlx::query("INSERT INTO GitlabProjects (id, name, url) VALUES ( ? )")
+            //     .bind(event.)
+            //     .execute(&mut *tx)
+            //     .await
+            //     .unwrap()
+            //     .last_insert_id();
+            // trace!("Inserted Gitlab event id: {} @ {}", event_id, datetime);
+            
+
+            tx.commit().await.expect("Couldn't apply transaction ._.");
+        }
+
         assert!(tables.len() > 0);
     }
 }
@@ -187,8 +225,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_todo() {
-        // Do something usefull
+    async fn import_data_from_gitlab_into_database() {
         dotenv().ok();
         Gitlab::get_or_init();
         let gitlab = Gitlab::init_from_env_vars();
