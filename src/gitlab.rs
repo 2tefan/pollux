@@ -23,6 +23,14 @@ pub struct PushData {
     pub commit_count: i64,
 }
 
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GitlabProject {
+    pub id: u64,
+    pub name_with_namespace: String,
+    pub web_url: String,
+    pub visibility: String,
+}
+
 #[derive(Debug)]
 pub struct Gitlab {
     token: String,
@@ -133,6 +141,35 @@ impl Gitlab {
         gitlab_events
     }
 
+    pub async fn get_project_details_by_id(&self, gitlab_project_id: u64) -> GitlabProject {
+        let client = reqwest::Client::new();
+        let token = &self.token;
+        let user_id = &self.user_id;
+        let url = format!("https://gitlab.com/api/v4/projects/{}", gitlab_project_id);
+
+        info!("Getting project info from Gitlab... ({})", url);
+
+        let res = client.get(url).bearer_auth(token).send().await;
+
+        let initial_res = match res {
+            Ok(initial_response) => initial_response,
+            Err(err) => panic!("Unable to get response from Gitlab!"),
+        };
+
+        let payload = match initial_res.text().await {
+            Ok(text) => text,
+            Err(err) => panic!("Unable to decode response from Gitlab: {}", err),
+        };
+
+        match serde_json::from_str(&payload) {
+            Ok(data) => data,
+            Err(err) => panic!(
+                "Unable to decode json response from Gitlab: {}\nThis is what we received:\n{}",
+                err, payload
+            ),
+        }
+    }
+
     pub async fn insert_gitlab_events_into_db(&self, events: Vec<GitlabEvent>) {
         let db = database::Database::get_or_init().await;
         let pool = db.get_pool().await;
@@ -179,7 +216,6 @@ impl Gitlab {
             //     .unwrap()
             //     .last_insert_id();
             // trace!("Inserted Gitlab event id: {} @ {}", event_id, datetime);
-            
 
             tx.commit().await.expect("Couldn't apply transaction ._.");
         }
@@ -220,8 +256,26 @@ mod tests {
                 time::macros::date!(2024 - 05 - 05), // (OffsetDateTime::now_utc() + Duration::days(-85)).date(),
             )
             .await;
-        println!("{:?}", result);
         assert_eq!(result.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn gitlab_get_pollux_project() {
+        dotenv().ok();
+        Gitlab::get_or_init();
+        let gitlab = Gitlab::init_from_env_vars();
+
+        let result = gitlab.get_project_details_by_id(61345567).await;
+        println!("{:?}", result);
+        assert_eq!(
+            result,
+            GitlabProject {
+                id: 61345567,
+                name_with_namespace: "2tefan Projects / Stats / Pollux".to_string(),
+                web_url: "https://gitlab.com/2tefan-projects/stats/pollux".to_string(),
+                visibility: "public".to_string()
+            }
+        );
     }
 
     #[tokio::test]
