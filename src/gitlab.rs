@@ -14,7 +14,7 @@ static GITLAB: OnceCell<Gitlab> = OnceCell::new();
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GitlabEvent {
-    pub project_id: i64,
+    pub project_id: u64,
     pub action_name: String,
     pub created_at: String,
     pub push_data: Option<PushData>,
@@ -22,12 +22,12 @@ pub struct GitlabEvent {
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PushData {
-    pub commit_count: i64,
+    pub commit_count: u64,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GitlabProject {
-    pub id: i64,
+    pub id: u64,
     pub name_with_namespace: String,
     pub web_url: String,
     pub visibility: Option<String>,
@@ -143,7 +143,7 @@ impl Gitlab {
         gitlab_events
     }
 
-    pub async fn get_project_details_by_id(&self, gitlab_project_id: i64) -> GitlabProject {
+    pub async fn get_project_details_by_id(&self, gitlab_project_id: u64) -> GitlabProject {
         let client = reqwest::Client::new();
         let token = &self.token;
         let user_id = &self.user_id;
@@ -174,7 +174,7 @@ impl Gitlab {
 
     pub async fn fetch_single_gitlab_project_from_db(
         tx: &mut Transaction<'static, MySql>,
-        project_id: i64,
+        project_id: u64,
     ) -> Option<GitlabProject> {
         let mut rows =
             sqlx::query("SELECT gitlab_id, name, url FROM GitlabProjects WHERE gitlab_id = ?")
@@ -193,7 +193,7 @@ impl Gitlab {
             }
 
             number_of_projects += 1;
-            let gitlab_id: i64 = row.try_get("gitlab_id").unwrap();
+            let gitlab_id: u64 = row.try_get("gitlab_id").unwrap();
             let name: &str = row.try_get("name").unwrap();
             let url: &str = row.try_get("url").unwrap();
             gitlab_project = Some(GitlabProject {
@@ -210,11 +210,11 @@ impl Gitlab {
     async fn fetch_project_from_gitlab_and_write_to_db(
         &self,
         tx: &mut Transaction<'static, MySql>,
-        project_id: i64,
+        project_id: u64,
     ) {
         let gitlab_project = self.get_project_details_by_id(project_id).await;
         let project_id =
-            sqlx::query("INSERT INTO GitlabProjects (gitlab_id, name, url) VALUES ( ? )")
+            sqlx::query("INSERT INTO GitlabProjects (gitlab_id, name, url) VALUES ( ?, ?, ? )")
                 .bind(gitlab_project.id)
                 .bind(gitlab_project.name_with_namespace)
                 .bind(gitlab_project.web_url)
