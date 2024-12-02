@@ -172,6 +172,32 @@ impl Gitlab {
         }
     }
 
+    pub async fn get_gitlab_action_by_name(
+        tx: &mut Transaction<'static, MySql>,
+        action_name: &String,
+    ) -> Option<u64> {
+        let mut rows = sqlx::query("SELECT id FROM GitActions WHERE name = ?")
+            .bind(action_name)
+            .fetch(&mut **tx);
+
+        let mut number_of_actions = 0;
+        let mut gitlab_action_id = Option::None;
+        while let Some(row) = rows.try_next().await.unwrap() {
+            if number_of_actions > 0 {
+                error!(
+                    "There are more than 1x Gitlab Actions with the same name! (name={}) - skipping this event!",
+                    action_name
+                );
+                return Option::None;
+            }
+
+            number_of_actions += 1;
+            gitlab_action_id = Some(row.try_get("id").unwrap());
+        }
+
+        gitlab_action_id
+    }
+
     pub async fn fetch_single_gitlab_project_from_db(
         tx: &mut Transaction<'static, MySql>,
         project_id: u64,
@@ -225,19 +251,45 @@ impl Gitlab {
         trace!("Inserted GitlabProject id: {}", project_id);
     }
 
-    async fn insert_event(
-        &self,
+    async fn insert_gitlab_action(
         tx: &mut Transaction<'static, MySql>,
-        datetime: DateTime<Utc>,
-    ) {
-            let event_id = sqlx::query("INSERT INTO Events (timestamp) VALUES ( ? )")
-                .bind(datetime.format("%Y-%m-%d %H:%M:%S").to_string())
-                .execute(&mut **tx)
-                .await
-                .unwrap()
-                .last_insert_id();
-            trace!("Inserted Gitlab event id: {} @ {}", event_id, datetime);
-            // return  event_id;
+        action_name: &String,
+    ) -> u64 {
+        let action_id = sqlx::query("INSERT INTO GitActions (name) VALUES ( ? )")
+            .bind(action_name)
+            .execute(&mut **tx)
+            .await
+            .unwrap()
+            .last_insert_id();
+        trace!("Inserted Gitlab action id: {} ({})", action_id, action_name);
+        return action_id;
+    }
+
+    async fn insert_event(tx: &mut Transaction<'static, MySql>, datetime: DateTime<Utc>) -> u64 {
+        let event_id = sqlx::query("INSERT INTO Events (timestamp) VALUES ( ? )")
+            .bind(datetime.format("%Y-%m-%d %H:%M:%S").to_string())
+            .execute(&mut **tx)
+            .await
+            .unwrap()
+            .last_insert_id();
+        trace!("Inserted Gitlab event id: {} @ {}", event_id, datetime);
+        return event_id;
+    }
+
+    async fn insert_gitlab_event(
+        tx: &mut Transaction<'static, MySql>,
+        event_id: u64,
+        action_id: u64,
+        project_id: u64,
+    ) -> u64 {
+        sqlx::query("INSERT INTO GitlabEvents (id, action_id, gitlab_project_id) VALUES ( ?, ?, ?)")
+            .bind(event_id)
+            .bind(action_id)
+            .bind(project_id)
+            .execute(&mut **tx)
+            .await
+            .unwrap()
+            .last_insert_id()
     }
 
     pub async fn insert_gitlab_events_into_db(&self, events: Vec<GitlabEvent>) {
@@ -275,11 +327,21 @@ impl Gitlab {
             // Inserting GitlabProject
             // TODO fetching name + url from gitlab and insert it, if missing
             if gitlab_project_option.await.is_none() {
-                self.fetch_project_from_gitlab_and_write_to_db(tx_ref, event.project_id).await;
+                self.fetch_project_from_gitlab_and_write_to_db(tx_ref, event.project_id)
+                    .await;
             }
 
-            // Beginning with Event itself
-            self.insert_event(tx_ref, datetime).await;
+            // TODO: Handle push_data (multiple commits!)
+            let action_id =
+                match Gitlab::get_gitlab_action_by_name(tx_ref, &event.action_name).await {
+                    Some(value) => value,
+                    None => Gitlab::insert_gitlab_action(tx_ref, &event.action_name).await,
+                };
+
+            // Add event itself
+            let event_id = Gitlab::insert_event(tx_ref, datetime).await;
+
+            let gitlab_event_id = Gitlab::insert_gitlab_event(&mut tx, event_id, action_id, event.project_id).await;
 
             // let event_id = sqlx::query("INSERT INTO GitlabProjects (id, name, url) VALUES ( ? )")
             //     .bind(event.)
