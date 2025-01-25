@@ -3,6 +3,7 @@ extern crate rocket;
 
 
 mod gitlab;
+mod github;
 mod database;
 
 
