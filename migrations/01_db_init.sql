@@ -3,7 +3,7 @@
 --
 -- Host: 127.0.0.1    Database: pollux
 -- ------------------------------------------------------
--- Server version	11.5.2-MariaDB-ubu2404
+-- Server version	11.6.2-MariaDB-ubu2404
 
 /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
 /*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
@@ -27,7 +27,7 @@ CREATE TABLE `Events` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `timestamp` datetime NOT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=60 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -40,56 +40,79 @@ DROP TABLE IF EXISTS `GitActions`;
 CREATE TABLE `GitActions` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `name` varchar(100) NOT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `GithubEvents`
---
-
-DROP TABLE IF EXISTS `GithubEvents`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
-CREATE TABLE `GithubEvents` (
-  `id` int(10) unsigned NOT NULL,
   PRIMARY KEY (`id`),
-  CONSTRAINT `GithubEvents_Events_FK` FOREIGN KEY (`id`) REFERENCES `Events` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
+  UNIQUE KEY `GitActions_UNIQUE` (`name`)
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `GitlabEvents`
+-- Table structure for table `GitEvents`
 --
 
-DROP TABLE IF EXISTS `GitlabEvents`;
+DROP TABLE IF EXISTS `GitEvents`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
-CREATE TABLE `GitlabEvents` (
+CREATE TABLE `GitEvents` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
-  `gitlab_project_id` int(10) unsigned NOT NULL,
-  `action_id` int(10) unsigned NOT NULL,
+  `project_fk` int(10) unsigned NOT NULL,
+  `action_fk` int(10) unsigned NOT NULL,
   PRIMARY KEY (`id`),
-  KEY `GitlabEvents_GitlabProjects_FK` (`gitlab_project_id`),
-  KEY `GitlabEvents_GitProjects_FK` (`action_id`),
+  KEY `GitlabEvents_GitlabProjects_FK` (`project_fk`),
+  KEY `GitlabEvents_GitProjects_FK` (`action_fk`),
   CONSTRAINT `GitlabEvents_Events_FK` FOREIGN KEY (`id`) REFERENCES `Events` (`id`),
-  CONSTRAINT `GitlabEvents_GitProjects_FK` FOREIGN KEY (`action_id`) REFERENCES `GitActions` (`id`),
-  CONSTRAINT `GitlabEvents_GitlabProjects_FK` FOREIGN KEY (`gitlab_project_id`) REFERENCES `GitlabProjects` (`gitlab_id`)
+  CONSTRAINT `GitlabEvents_GitProjects_FK` FOREIGN KEY (`action_fk`) REFERENCES `GitActions` (`id`),
+  CONSTRAINT `GitlabEvents_GitlabProjects_FK` FOREIGN KEY (`project_fk`) REFERENCES `GitProjects` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=60 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `GitPlatforms`
+--
+
+DROP TABLE IF EXISTS `GitPlatforms`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `GitPlatforms` (
+  `name` varchar(100) NOT NULL,
+  `lastSync` datetime DEFAULT NULL,
+  PRIMARY KEY (`name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `GitlabProjects`
+-- Table structure for table `GitProjects`
 --
 
-DROP TABLE IF EXISTS `GitlabProjects`;
+DROP TABLE IF EXISTS `GitProjects`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
-CREATE TABLE `GitlabProjects` (
-  `gitlab_id` int(10) unsigned NOT NULL,
+CREATE TABLE `GitProjects` (
+  `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `name` varchar(100) NOT NULL,
   `url` varchar(500) NOT NULL,
-  PRIMARY KEY (`gitlab_id`)
+  `platform` varchar(100) NOT NULL,
+  `platform_project_id` int(10) unsigned NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `GitProjects_UNIQUE` (`platform`,`platform_project_id`),
+  CONSTRAINT `GitProjects_GitPlatforms_FK` FOREIGN KEY (`platform`) REFERENCES `GitPlatforms` (`name`)
+) ENGINE=InnoDB AUTO_INCREMENT=14 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `_sqlx_migrations`
+--
+
+DROP TABLE IF EXISTS `_sqlx_migrations`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `_sqlx_migrations` (
+  `version` bigint(20) NOT NULL,
+  `description` text NOT NULL,
+  `installed_on` timestamp NOT NULL DEFAULT current_timestamp(),
+  `success` tinyint(1) NOT NULL,
+  `checksum` blob NOT NULL,
+  `execution_time` bigint(20) NOT NULL,
+  PRIMARY KEY (`version`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
@@ -102,4 +125,4 @@ CREATE TABLE `GitlabProjects` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*M!100616 SET NOTE_VERBOSITY=@OLD_NOTE_VERBOSITY */;
 
--- Dump completed on 2024-11-17 16:37:13
+-- Dump completed on 2025-01-25 13:02:54

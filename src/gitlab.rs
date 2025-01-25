@@ -26,11 +26,19 @@ pub struct PushData {
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct GitlabProject {
+pub struct GitlabProjectAPI {
     pub id: u64,
     pub name_with_namespace: String,
     pub web_url: String,
     pub visibility: Option<String>,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GitlabProject {
+    pub id: u64,
+    pub platform_project_id: u64,
+    pub name: String,
+    pub url: String,
 }
 
 #[derive(Debug)]
@@ -143,7 +151,7 @@ impl Gitlab {
         gitlab_events
     }
 
-    pub async fn get_project_details_by_id(&self, gitlab_project_id: u64) -> GitlabProject {
+    pub async fn get_project_details_by_id(&self, gitlab_project_id: u64) -> GitlabProjectAPI {
         let client = reqwest::Client::new();
         let token = &self.token;
         let user_id = &self.user_id;
@@ -200,11 +208,12 @@ impl Gitlab {
 
     pub async fn fetch_single_gitlab_project_from_db(
         tx: &mut Transaction<'static, MySql>,
-        project_id: u64,
+        platform_project_id: u64,
     ) -> Option<GitlabProject> {
         let mut rows =
-            sqlx::query("SELECT gitlab_id, name, url FROM GitlabProjects WHERE gitlab_id = ?")
-                .bind(project_id)
+            sqlx::query("SELECT id, platform_project_id, name, url FROM GitProjects WHERE platform_project_id = ? AND platform = ?")
+                .bind(platform_project_id)
+                .bind("Gitlab")
                 .fetch(&mut **tx);
 
         let mut number_of_projects = 0;
@@ -213,20 +222,21 @@ impl Gitlab {
             if number_of_projects > 0 {
                 error!(
                     "There are more than 1x Gitlab projects in DB (id={}) - skipping this event!",
-                    project_id
+                    platform_project_id
                 );
                 return Option::None;
             }
 
             number_of_projects += 1;
-            let gitlab_id: u64 = row.try_get("gitlab_id").unwrap();
+            let id: u64 = row.try_get("id").unwrap();
+            let platform_project_id: u64 = row.try_get("platform_project_id").unwrap();
             let name: &str = row.try_get("name").unwrap();
             let url: &str = row.try_get("url").unwrap();
             gitlab_project = Some(GitlabProject {
-                id: gitlab_id,
-                name_with_namespace: name.to_string(),
-                web_url: url.to_string(),
-                visibility: Option::None,
+                id,
+                platform_project_id,
+                name: name.to_string(),
+                url: url.to_string(),
             });
         }
 
@@ -237,10 +247,11 @@ impl Gitlab {
         &self,
         tx: &mut Transaction<'static, MySql>,
         project_id: u64,
-    ) {
+    ) -> u64 {
         let gitlab_project = self.get_project_details_by_id(project_id).await;
         let project_id =
-            sqlx::query("INSERT INTO GitlabProjects (gitlab_id, name, url) VALUES ( ?, ?, ? )")
+            sqlx::query("INSERT INTO GitProjects (platform, platform_project_id, name, url) VALUES ( ?, ?, ?, ? )")
+                .bind("Gitlab")
                 .bind(gitlab_project.id)
                 .bind(gitlab_project.name_with_namespace)
                 .bind(gitlab_project.web_url)
@@ -248,7 +259,8 @@ impl Gitlab {
                 .await
                 .unwrap()
                 .last_insert_id();
-        trace!("Inserted GitlabProject id: {}", project_id);
+        trace!("Inserted GitProject (Gitlab) id: {}", project_id);
+        project_id
     }
 
     async fn insert_gitlab_action(
@@ -282,7 +294,7 @@ impl Gitlab {
         action_id: u64,
         project_id: u64,
     ) -> u64 {
-        sqlx::query("INSERT INTO GitlabEvents (id, action_id, gitlab_project_id) VALUES ( ?, ?, ?)")
+        sqlx::query("INSERT INTO GitEvents (id, action_fk, project_fk) VALUES ( ?, ?, ? )")
             .bind(event_id)
             .bind(action_id)
             .bind(project_id)
@@ -312,7 +324,7 @@ impl Gitlab {
             let tx_ref = tx.borrow_mut();
 
             // TODO: Maybe check if name is still up-to-date etc.
-            let gitlab_project_option =
+            let gitlab_project_option_future =
                 Gitlab::fetch_single_gitlab_project_from_db(tx_ref, event.project_id);
 
             let datetime: DateTime<Utc> = match event.created_at.parse() {
@@ -326,10 +338,12 @@ impl Gitlab {
 
             // Inserting GitlabProject
             // TODO fetching name + url from gitlab and insert it, if missing
-            if gitlab_project_option.await.is_none() {
-                self.fetch_project_from_gitlab_and_write_to_db(tx_ref, event.project_id)
-                    .await;
-            }
+            let project_id = if let Some(project) = gitlab_project_option_future.await {
+                project.id
+            } else {
+                self.fetch_project_from_gitlab_and_write_to_db(tx_ref, event.project_id).await
+            };
+
 
             // TODO: Handle push_data (multiple commits!)
             let action_id =
@@ -341,7 +355,7 @@ impl Gitlab {
             // Add event itself
             let event_id = Gitlab::insert_event(tx_ref, datetime).await;
 
-            let gitlab_event_id = Gitlab::insert_gitlab_event(&mut tx, event_id, action_id, event.project_id).await;
+            let gitlab_event_id = Gitlab::insert_gitlab_event(&mut tx, event_id, action_id, project_id).await;
 
             // let event_id = sqlx::query("INSERT INTO GitlabProjects (id, name, url) VALUES ( ? )")
             //     .bind(event.)
@@ -403,7 +417,7 @@ mod tests {
         println!("{:?}", result);
         assert_eq!(
             result,
-            GitlabProject {
+            GitlabProjectAPI {
                 id: 61345567,
                 name_with_namespace: "2tefan Projects / Stats / Pollux".to_string(),
                 web_url: "https://gitlab.com/2tefan-projects/stats/pollux".to_string(),
