@@ -58,9 +58,9 @@ CREATE TABLE `GitEvents` (
   `action_fk` int(10) unsigned NOT NULL,
   PRIMARY KEY (`id`),
   KEY `GitEvents_GitProjects_FK` (`project_fk`),
-  KEY `GitEvents_GitProjects_FK` (`action_fk`),
+  KEY `GitEvents_GitAction_FK` (`action_fk`),
   CONSTRAINT `GitEvents_Events_FK` FOREIGN KEY (`id`) REFERENCES `Events` (`id`),
-  CONSTRAINT `GitEvents_GitProjects_FK` FOREIGN KEY (`action_fk`) REFERENCES `GitActions` (`id`),
+  CONSTRAINT `GitEvents_GitActions_FK` FOREIGN KEY (`action_fk`) REFERENCES `GitActions` (`id`),
   CONSTRAINT `GitEvents_GitProjects_FK` FOREIGN KEY (`project_fk`) REFERENCES `GitProjects` (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=60 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
