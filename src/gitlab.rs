@@ -11,6 +11,7 @@ use sqlx::{MySql, Row, Transaction};
 use time::Date;
 
 static GITLAB: OnceCell<Gitlab> = OnceCell::new();
+static GIT_PLATFORM_ID: &str = "Gitlab";
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GitlabEvent {
@@ -180,6 +181,30 @@ impl Gitlab {
         }
     }
 
+    pub async fn set_platform(tx: &mut Transaction<'static, MySql>) {
+        let rows = sqlx::query("SELECT name FROM GitPlatforms WHERE name = ?")
+            .bind(GIT_PLATFORM_ID)
+            .fetch_all(&mut **tx) // Use fetch_all to collect all rows immediately
+            .await
+            .unwrap();
+
+        if rows.len() > 1 {
+            panic!(
+            "There are more than 1x Gitlab Platforms with the same name! (name={}) - This can't be!",
+            GIT_PLATFORM_ID
+        );
+        }
+
+        // Add platform, if it not yet exists
+        if rows.is_empty() {
+            sqlx::query("INSERT INTO GitPlatforms (name) VALUES ( ? )")
+                .bind(GIT_PLATFORM_ID)
+                .execute(&mut **tx)
+                .await
+                .unwrap();
+        }
+    }
+
     pub async fn get_gitlab_action_by_name(
         tx: &mut Transaction<'static, MySql>,
         action_name: &String,
@@ -213,7 +238,7 @@ impl Gitlab {
         let mut rows =
             sqlx::query("SELECT id, platform_project_id, name, url FROM GitProjects WHERE platform_project_id = ? AND platform = ?")
                 .bind(platform_project_id)
-                .bind("Gitlab")
+                .bind(GIT_PLATFORM_ID)
                 .fetch(&mut **tx);
 
         let mut number_of_projects = 0;
@@ -248,10 +273,14 @@ impl Gitlab {
         tx: &mut Transaction<'static, MySql>,
         project_id: u64,
     ) -> u64 {
-        let gitlab_project = self.get_project_details_by_id(project_id).await;
+        let gitlab_project_future = self.get_project_details_by_id(project_id);
+
+        Gitlab::set_platform(tx).await; // TODO: Only do this at initial setup
+
+        let gitlab_project = gitlab_project_future.await;
         let project_id =
             sqlx::query("INSERT INTO GitProjects (platform, platform_project_id, name, url) VALUES ( ?, ?, ?, ? )")
-                .bind("Gitlab")
+                .bind(GIT_PLATFORM_ID)
                 .bind(gitlab_project.id)
                 .bind(gitlab_project.name_with_namespace)
                 .bind(gitlab_project.web_url)
@@ -341,9 +370,9 @@ impl Gitlab {
             let project_id = if let Some(project) = gitlab_project_option_future.await {
                 project.id
             } else {
-                self.fetch_project_from_gitlab_and_write_to_db(tx_ref, event.project_id).await
+                self.fetch_project_from_gitlab_and_write_to_db(tx_ref, event.project_id)
+                    .await
             };
-
 
             // TODO: Handle push_data (multiple commits!)
             let action_id =
@@ -355,7 +384,8 @@ impl Gitlab {
             // Add event itself
             let event_id = Gitlab::insert_event(tx_ref, datetime).await;
 
-            let gitlab_event_id = Gitlab::insert_gitlab_event(&mut tx, event_id, action_id, project_id).await;
+            let gitlab_event_id =
+                Gitlab::insert_gitlab_event(&mut tx, event_id, action_id, project_id).await;
 
             // let event_id = sqlx::query("INSERT INTO GitlabProjects (id, name, url) VALUES ( ? )")
             //     .bind(event.)
