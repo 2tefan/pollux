@@ -5,7 +5,10 @@ use std::borrow::{Borrow, BorrowMut};
 use chrono::{DateTime, Utc};
 use log::{error, log_enabled, trace, Level};
 use once_cell::sync::OnceCell;
-use reqwest::header::{HeaderMap, ACCEPT, USER_AGENT};
+use reqwest::{
+    header::{self, HeaderMap, HeaderValue, ACCEPT, ETAG, IF_NONE_MATCH, USER_AGENT},
+    StatusCode,
+};
 use rocket::futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use sqlx::{MySql, Row, Transaction};
@@ -51,7 +54,7 @@ pub struct GithubProject {
 pub struct Github {
     token: String,
     username: String,
-    e_tag: Option<String>,
+    e_tag: Vec<HeaderValue>,
 }
 
 impl Github {
@@ -61,7 +64,7 @@ impl Github {
                 .expect("Please specify GITHUB_API_TOKEN as env var!"),
             username: std::env::var("GITHUB_USERNAME")
                 .expect("Please specify GITHUB_USERNAME as env var!"),
-            e_tag: None, // Maybe save tag in DB and fetch it again on startup?
+            e_tag: Vec::new(), // Maybe save tag in DB and fetch it again on startup?
         }
     }
 
@@ -95,17 +98,15 @@ impl Github {
         None
     }
 
-    pub async fn get_events(&self) -> Vec<GithubEvent> {
+    pub async fn get_events(&mut self) -> Vec<GithubEvent> {
         let client = reqwest::Client::new();
         let token = &self.token;
         let github_username = &self.username;
         let url = format!("https://api.github.com/users/{}/events", github_username);
 
         info!("Getting events from Github... ({})", url);
-        // TODO: Use etag header
 
         let mut github_events: Vec<GithubEvent> = Vec::new();
-
         let mut current_page = 1;
         let events_per_page_parameter = 5;
         let mut next_page_url = Some(format!(
@@ -119,6 +120,15 @@ impl Github {
         headers.insert("X-GitHub-Api-Version", "2022-11-28".parse().unwrap());
 
         loop {
+            let mut using_etag = false;
+            if self.e_tag.get(current_page - 1).is_some() {
+                headers.insert(
+                    IF_NONE_MATCH,
+                    self.e_tag.get(current_page - 1).unwrap().clone(),
+                );
+                using_etag = true;
+            }
+
             let res = client
                 .get(next_page_url.unwrap())
                 .bearer_auth(token)
@@ -139,6 +149,11 @@ impl Github {
             };
             debug!("{:?}", payload);
 
+            if status == StatusCode::NOT_MODIFIED && using_etag {
+                debug!("Got 304 from Github + etag/IF_NONE_MATCH was set, so no new events!");
+                return github_events;
+            }
+
             if !status.is_success() {
                 error!("We got this data: {}", payload.as_str());
                 panic!("Couldn't fetch events from Github! {}", status.as_str());
@@ -153,6 +168,14 @@ impl Github {
                 ),
                 None => panic!("Didn't got link header back from Github!"),
             };
+
+            if let Some(etag) = header.get("etag") {
+                //headers.append(IF_NONE_MATCH, etag.clone());
+                if self.e_tag.len() < current_page {
+                    self.e_tag.resize(current_page, etag.clone());
+                }
+                self.e_tag[current_page - 1] = etag.clone();
+            }
 
             let mut data: Vec<GithubEvent> = match serde_json::from_str(&payload) {
                 Ok(data) => data,
@@ -451,11 +474,23 @@ mod tests {
     #[tokio::test]
     async fn github_api_is_still_sane() {
         dotenv().ok();
-        let github = Github::init_from_env_vars();
+        let mut github = Github::init_from_env_vars();
 
         let result = github.get_events().await;
         //assert_eq!(result, OffsetDateTime::now_utc().date().to_string())
         assert_eq!(result.len(), 12);
+    }
+
+    #[tokio::test]
+    async fn github_api_is_still_sane_using_etag() {
+        dotenv().ok();
+        let mut github = Github::init_from_env_vars();
+
+        let result = github.get_events().await;
+        let result_not_modified = github.get_events().await;
+        //assert_eq!(result, OffsetDateTime::now_utc().date().to_string())
+        assert_eq!(result.len(), 12);
+        assert_eq!(result_not_modified.len(), 0);
     }
 
     // #[tokio::test]
