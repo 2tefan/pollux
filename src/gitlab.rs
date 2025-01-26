@@ -96,11 +96,18 @@ impl Gitlab {
                 Err(err) => panic!("Unable to get response from Gitlab!"),
             };
 
+            let status = initial_res.status();
             let header = initial_res.headers().clone();
             let payload = match initial_res.text().await {
                 Ok(text) => text,
                 Err(err) => panic!("Unable to decode response from Gitlab: {}", err),
             };
+            debug!("{:?}", payload);
+
+            if !status.is_success() {
+                error!("We got this data: {}", payload.as_str());
+                panic!("Couldn't fetch events from Gitlab! {}", status.as_str());
+            }
 
             let total_pages = match header.get("x-total-pages") {
                 Some(x_total_pages) => x_total_pages
