@@ -28,7 +28,7 @@ pub struct GithubEvent {
 pub struct GithubRepoAPI {
     pub id: u64,
     pub name: String,
-    pub url: String
+    pub url: String,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -119,26 +119,30 @@ impl Github {
         headers.insert("X-GitHub-Api-Version", "2022-11-28".parse().unwrap());
 
         loop {
-            let res1 = client
+            let res = client
                 .get(next_page_url.unwrap())
                 .bearer_auth(token)
-                .headers(headers.clone());
+                .headers(headers.clone())
+                .send()
+                .await;
 
-            print!("{:?}", res1);
-            print!("{}", token);
-
-            let res = res1.send().await;
             let initial_res = match res {
                 Ok(initial_response) => initial_response,
                 Err(err) => panic!("Unable to get response from Github! ({})", err),
             };
 
+            let status = initial_res.status();
             let header = initial_res.headers().clone();
             let payload = match initial_res.text().await {
                 Ok(text) => text,
                 Err(err) => panic!("Unable to decode response from Github: {}", err),
             };
             debug!("{:?}", payload);
+
+            if !status.is_success() {
+                error!("We got this data: {}", payload.as_str());
+                panic!("Couldn't fetch events from Github! {}", status.as_str());
+            }
 
             next_page_url = match header.get("link") {
                 Some(link) => Github::parse_header_for_next_page(
