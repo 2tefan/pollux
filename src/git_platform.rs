@@ -139,7 +139,7 @@ pub trait GitPlatform {
         project_id
     }
 
-    async fn insert_github_action(
+    async fn insert_git_action(
         tx: &mut Transaction<'static, MySql>,
         action_name: &String,
     ) -> u64 {
@@ -164,7 +164,7 @@ pub trait GitPlatform {
         return event_id;
     }
 
-    async fn insert_github_event(
+    async fn insert_git_event(
         tx: &mut Transaction<'static, MySql>,
         event_id: u64,
         action_id: u64,

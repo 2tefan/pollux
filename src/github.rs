@@ -251,14 +251,14 @@ impl Github {
             let action_id =
                 match Github::get_git_action_by_name(tx_ref, &event.type_of_action).await {
                     Some(value) => value,
-                    None => Github::insert_github_action(tx_ref, &event.type_of_action).await,
+                    None => Github::insert_git_action(tx_ref, &event.type_of_action).await,
                 };
 
             // Add event itself
             let event_id = Github::insert_event(tx_ref, datetime).await;
 
             let github_event_id =
-                Github::insert_github_event(&mut tx, event_id, action_id, project_id).await;
+                Github::insert_git_event(&mut tx, event_id, action_id, project_id).await;
 
             tx.commit().await.expect("Couldn't apply transaction ._.");
         }

@@ -1,4 +1,4 @@
-use crate::database;
+use crate::{database, git_platform::{GitEventAPI, GitPlatform}};
 
 use std::borrow::BorrowMut;
 
@@ -11,7 +11,6 @@ use sqlx::{MySql, Row, Transaction};
 use time::Date;
 
 static GITLAB: OnceCell<Gitlab> = OnceCell::new();
-static GIT_PLATFORM_ID: &str = "Gitlab";
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GitlabEvent {
@@ -20,6 +19,8 @@ pub struct GitlabEvent {
     pub created_at: String,
     pub push_data: Option<PushData>,
 }
+
+impl GitEventAPI for GitlabEvent {}
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PushData {
@@ -48,8 +49,11 @@ pub struct Gitlab {
     user_id: String,
 }
 
-impl Gitlab {
-    pub fn init_from_env_vars() -> Gitlab {
+impl GitPlatform for Gitlab {
+    const GIT_PLATFORM_ID: &'static str = "Gitlab";
+    type GitEventAPI = GitlabEvent;
+
+    fn init_from_env_vars() -> Self {
         Gitlab {
             token: std::env::var("GITLAB_API_TOKEN")
                 .expect("Please specify GITLAB_API_TOKEN as env var!"),
@@ -58,6 +62,12 @@ impl Gitlab {
         }
     }
 
+    async fn get_events(&mut self) -> Vec<Self::GitEventAPI> {
+        todo!()
+    }
+}
+
+impl Gitlab {
     pub fn get_or_init() {
         GITLAB.get_or_init(|| Self::init_from_env_vars());
     }
@@ -188,93 +198,6 @@ impl Gitlab {
         }
     }
 
-    pub async fn set_platform(tx: &mut Transaction<'static, MySql>) {
-        let rows = sqlx::query("SELECT name FROM GitPlatforms WHERE name = ?")
-            .bind(GIT_PLATFORM_ID)
-            .fetch_all(&mut **tx) // Use fetch_all to collect all rows immediately
-            .await
-            .unwrap();
-
-        if rows.len() > 1 {
-            panic!(
-            "There are more than 1x Gitlab Platforms with the same name! (name={}) - This can't be!",
-            GIT_PLATFORM_ID
-        );
-        }
-
-        // Add platform, if it not yet exists
-        if rows.is_empty() {
-            sqlx::query("INSERT INTO GitPlatforms (name) VALUES ( ? )")
-                .bind(GIT_PLATFORM_ID)
-                .execute(&mut **tx)
-                .await
-                .unwrap();
-        }
-    }
-
-    pub async fn get_gitlab_action_by_name(
-        tx: &mut Transaction<'static, MySql>,
-        action_name: &String,
-    ) -> Option<u64> {
-        let mut rows = sqlx::query("SELECT id FROM GitActions WHERE name = ?")
-            .bind(action_name)
-            .fetch(&mut **tx);
-
-        let mut number_of_actions = 0;
-        let mut gitlab_action_id = Option::None;
-        while let Some(row) = rows.try_next().await.unwrap() {
-            if number_of_actions > 0 {
-                error!(
-                    "There are more than 1x Gitlab Actions with the same name! (name={}) - skipping this event!",
-                    action_name
-                );
-                return Option::None;
-            }
-
-            number_of_actions += 1;
-            gitlab_action_id = Some(row.try_get("id").unwrap());
-        }
-
-        gitlab_action_id
-    }
-
-    pub async fn fetch_single_gitlab_project_from_db(
-        tx: &mut Transaction<'static, MySql>,
-        platform_project_id: u64,
-    ) -> Option<GitlabProject> {
-        let mut rows =
-            sqlx::query("SELECT id, platform_project_id, name, url FROM GitProjects WHERE platform_project_id = ? AND platform = ?")
-                .bind(platform_project_id)
-                .bind(GIT_PLATFORM_ID)
-                .fetch(&mut **tx);
-
-        let mut number_of_projects = 0;
-        let mut gitlab_project = Option::None;
-        while let Some(row) = rows.try_next().await.unwrap() {
-            if number_of_projects > 0 {
-                error!(
-                    "There are more than 1x Gitlab projects in DB (id={}) - skipping this event!",
-                    platform_project_id
-                );
-                return Option::None;
-            }
-
-            number_of_projects += 1;
-            let id: u64 = row.try_get("id").unwrap();
-            let platform_project_id: u64 = row.try_get("platform_project_id").unwrap();
-            let name: &str = row.try_get("name").unwrap();
-            let url: &str = row.try_get("url").unwrap();
-            gitlab_project = Some(GitlabProject {
-                id,
-                platform_project_id,
-                name: name.to_string(),
-                url: url.to_string(),
-            });
-        }
-
-        gitlab_project
-    }
-
     async fn fetch_project_from_gitlab_and_write_to_db(
         &self,
         tx: &mut Transaction<'static, MySql>,
@@ -287,7 +210,7 @@ impl Gitlab {
         let gitlab_project = gitlab_project_future.await;
         let project_id =
             sqlx::query("INSERT INTO GitProjects (platform, platform_project_id, name, url) VALUES ( ?, ?, ?, ? )")
-                .bind(GIT_PLATFORM_ID)
+                .bind(Self::GIT_PLATFORM_ID)
                 .bind(gitlab_project.id)
                 .bind(gitlab_project.name_with_namespace)
                 .bind(gitlab_project.web_url)
@@ -297,47 +220,6 @@ impl Gitlab {
                 .last_insert_id();
         trace!("Inserted GitProject (Gitlab) id: {}", project_id);
         project_id
-    }
-
-    async fn insert_gitlab_action(
-        tx: &mut Transaction<'static, MySql>,
-        action_name: &String,
-    ) -> u64 {
-        let action_id = sqlx::query("INSERT INTO GitActions (name) VALUES ( ? )")
-            .bind(action_name)
-            .execute(&mut **tx)
-            .await
-            .unwrap()
-            .last_insert_id();
-        trace!("Inserted Gitlab action id: {} ({})", action_id, action_name);
-        return action_id;
-    }
-
-    async fn insert_event(tx: &mut Transaction<'static, MySql>, datetime: DateTime<Utc>) -> u64 {
-        let event_id = sqlx::query("INSERT INTO Events (timestamp) VALUES ( ? )")
-            .bind(datetime.format("%Y-%m-%d %H:%M:%S").to_string())
-            .execute(&mut **tx)
-            .await
-            .unwrap()
-            .last_insert_id();
-        trace!("Inserted Gitlab event id: {} @ {}", event_id, datetime);
-        return event_id;
-    }
-
-    async fn insert_gitlab_event(
-        tx: &mut Transaction<'static, MySql>,
-        event_id: u64,
-        action_id: u64,
-        project_id: u64,
-    ) -> u64 {
-        sqlx::query("INSERT INTO GitEvents (id, action_fk, project_fk) VALUES ( ?, ?, ? )")
-            .bind(event_id)
-            .bind(action_id)
-            .bind(project_id)
-            .execute(&mut **tx)
-            .await
-            .unwrap()
-            .last_insert_id()
     }
 
     pub async fn insert_gitlab_events_into_db(&self, events: Vec<GitlabEvent>) {
@@ -361,7 +243,7 @@ impl Gitlab {
 
             // TODO: Maybe check if name is still up-to-date etc.
             let gitlab_project_option_future =
-                Gitlab::fetch_single_gitlab_project_from_db(tx_ref, event.project_id);
+                Gitlab::fetch_single_git_project_from_db(tx_ref, event.project_id);
 
             let datetime: DateTime<Utc> = match event.created_at.parse() {
                 Ok(datetime) => datetime,
@@ -383,16 +265,16 @@ impl Gitlab {
 
             // TODO: Handle push_data (multiple commits!)
             let action_id =
-                match Gitlab::get_gitlab_action_by_name(tx_ref, &event.action_name).await {
+                match Gitlab::get_git_action_by_name(tx_ref, &event.action_name).await {
                     Some(value) => value,
-                    None => Gitlab::insert_gitlab_action(tx_ref, &event.action_name).await,
+                    None => Gitlab::insert_git_action(tx_ref, &event.action_name).await,
                 };
 
             // Add event itself
             let event_id = Gitlab::insert_event(tx_ref, datetime).await;
 
             let gitlab_event_id =
-                Gitlab::insert_gitlab_event(&mut tx, event_id, action_id, project_id).await;
+                Gitlab::insert_git_event(&mut tx, event_id, action_id, project_id).await;
 
             // let event_id = sqlx::query("INSERT INTO GitlabProjects (id, name, url) VALUES ( ? )")
             //     .bind(event.)
