@@ -5,7 +5,6 @@ use std::borrow::BorrowMut;
 use chrono::{DateTime, Utc};
 use log::{error, log_enabled, trace, Level};
 use once_cell::sync::OnceCell;
-use rocket::futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use sqlx::{MySql, Row, Transaction};
 use time::Date;
