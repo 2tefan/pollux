@@ -1,6 +1,6 @@
 use crate::database;
 
-use std::borrow::{Borrow, BorrowMut};
+use std::borrow::BorrowMut;
 
 use chrono::{DateTime, Utc};
 use log::{error, log_enabled, trace, Level};

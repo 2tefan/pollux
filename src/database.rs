@@ -1,4 +1,3 @@
-use std::borrow::BorrowMut;
 
 use sqlx::{MySql, Pool};
 use tokio::sync::OnceCell;
@@ -47,14 +46,14 @@ impl Database {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    
 
-    use super::*;
+    
     use dotenv::dotenv;
-    use once_cell::sync::Lazy;
+    
     use sqlx::MySql;
     use testcontainers::{
-        core::{wait::HealthWaitStrategy, IntoContainerPort, WaitFor},
+        core::{IntoContainerPort, WaitFor},
         runners::AsyncRunner,
         GenericImage, ImageExt,
     };

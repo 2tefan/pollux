@@ -3,19 +3,17 @@ use crate::{
     git_platform::{GitEventAPI, GitPlatform, GitProject},
 };
 
-use std::borrow::{Borrow, BorrowMut};
+use std::borrow::BorrowMut;
 
 use chrono::{DateTime, Utc};
-use log::{error, log_enabled, trace, Level};
+use log::{error, log_enabled, Level};
 use once_cell::sync::OnceCell;
 use reqwest::{
-    header::{self, HeaderMap, HeaderValue, ACCEPT, ETAG, IF_NONE_MATCH, USER_AGENT},
+    header::{HeaderMap, HeaderValue, ACCEPT, IF_NONE_MATCH, USER_AGENT},
     StatusCode,
 };
-use rocket::futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
-use sqlx::{MySql, Row, Transaction};
-use time::Date;
+use sqlx::Row;
 
 static GITHUB: OnceCell<Github> = OnceCell::new();
 static GIT_PLATFORM_ID: &str = "Github";

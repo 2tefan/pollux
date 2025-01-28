@@ -10,7 +10,6 @@ mod git_platform;
 use cronjob::CronJob;
 use dotenv::dotenv;
 use gitlab::Gitlab;
-use log::{debug, info, log_enabled, warn, Level};
 use rocket::http::{ContentType, Status};
 
 #[get("/")]
