@@ -5,7 +5,7 @@ extern crate rocket;
 mod gitlab;
 mod github;
 mod database;
-
+mod git_platform;
 
 use cronjob::CronJob;
 use dotenv::dotenv;

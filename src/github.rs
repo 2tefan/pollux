@@ -1,4 +1,7 @@
-use crate::database;
+use crate::{
+    database,
+    git_platform::{GitEventAPI, GitPlatform, GitProject},
+};
 
 use std::borrow::{Borrow, BorrowMut};
 
@@ -27,6 +30,8 @@ pub struct GithubEvent {
     // action maybe?
 }
 
+impl GitEventAPI for GithubEvent {}
+
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GithubProjectAPI {
     pub id: u64,
@@ -49,8 +54,11 @@ pub struct Github {
     e_tag: Vec<HeaderValue>,
 }
 
-impl Github {
-    pub fn init_from_env_vars() -> Github {
+impl GitPlatform for Github {
+    const GIT_PLATFORM_ID: &'static str = "Github";
+    type GitEventAPI = GithubEvent;
+
+    fn init_from_env_vars() -> Self {
         Github {
             token: std::env::var("GITHUB_API_TOKEN")
                 .expect("Please specify GITHUB_API_TOKEN as env var!"),
@@ -60,37 +68,7 @@ impl Github {
         }
     }
 
-    pub fn get_or_init() {
-        GITHUB.get_or_init(|| Self::init_from_env_vars());
-    }
-
-    // Parse header like:
-    // < link: <https://api.github.com/user/26086452/events?per_page=2&page=2>; rel="next", <https://api.github.com/user/26086452/events?per_page=2&page=6>; rel="last"
-    fn parse_header_for_next_page(header: String) -> Option<String> {
-        for link in header.split(",") {
-            let parts: Vec<&str> = link.split(";").collect();
-
-            if parts.len() != 2 {
-                continue;
-            }
-
-            let rel_part = parts[1].trim();
-            if rel_part != r#"rel="next""# {
-                continue;
-            }
-
-            let url_part = parts[0].trim();
-            if !(url_part.starts_with("<") && url_part.ends_with(">")) {
-                continue;
-            }
-
-            return Some(url_part[1..url_part.len() - 1].to_string());
-        }
-
-        None
-    }
-
-    pub async fn get_events(&mut self) -> Vec<GithubEvent> {
+    async fn get_events(&mut self) -> Vec<Self::GitEventAPI> {
         let client = reqwest::Client::new();
         let token = &self.token;
         let github_username = &self.username;
@@ -198,191 +176,37 @@ impl Github {
             current_page += 1;
         }
     }
+}
 
-    // // TODO
-    // pub async fn get_project_details_by_id(&self, github_project_id: u64) -> GithubProjectAPI {
-    //     let client = reqwest::Client::new();
-    //     let token = &self.token;
-    //     let user_id = &self.username;
-    //     let url = format!("https://github.com/api/v4/projects/{}", github_project_id);
-
-    //     info!("Getting project info from Github... ({})", url);
-
-    //     let res = client.get(url).bearer_auth(token).send().await;
-
-    //     let initial_res = match res {
-    //         Ok(initial_response) => initial_response,
-    //         Err(err) => panic!("Unable to get response from Github!"),
-    //     };
-
-    //     let payload = match initial_res.text().await {
-    //         Ok(text) => text,
-    //         Err(err) => panic!("Unable to decode response from Github: {}", err),
-    //     };
-
-    //     match serde_json::from_str(&payload) {
-    //         Ok(data) => data,
-    //         Err(err) => panic!(
-    //             "Unable to decode json response from Github: {}\nThis is what we received:\n{}",
-    //             err, payload
-    //         ),
-    //     }
-    // }
-
-    // // TODO
-    pub async fn set_platform(tx: &mut Transaction<'static, MySql>) {
-        let rows = sqlx::query("SELECT name FROM GitPlatforms WHERE name = ?")
-            .bind(GIT_PLATFORM_ID)
-            .fetch_all(&mut **tx) // Use fetch_all to collect all rows immediately
-            .await
-            .unwrap();
-
-        if rows.len() > 1 {
-            panic!(
-            "There are more than 1x Github Platforms with the same name! (name={}) - This can't be!",
-            GIT_PLATFORM_ID
-        );
-        }
-
-        // Add platform, if it not yet exists
-        if rows.is_empty() {
-            sqlx::query("INSERT INTO GitPlatforms (name) VALUES ( ? )")
-                .bind(GIT_PLATFORM_ID)
-                .execute(&mut **tx)
-                .await
-                .unwrap();
-        }
+impl Github {
+    pub fn get_or_init() {
+        GITHUB.get_or_init(|| Self::init_from_env_vars());
     }
 
-    // // TODO
-    pub async fn get_github_action_by_name(
-        tx: &mut Transaction<'static, MySql>,
-        action_name: &String,
-    ) -> Option<u64> {
-        let mut rows = sqlx::query("SELECT id FROM GitActions WHERE name = ?")
-            .bind(action_name)
-            .fetch(&mut **tx);
+    // Parse header like:
+    // < link: <https://api.github.com/user/26086452/events?per_page=2&page=2>; rel="next", <https://api.github.com/user/26086452/events?per_page=2&page=6>; rel="last"
+    fn parse_header_for_next_page(header: String) -> Option<String> {
+        for link in header.split(",") {
+            let parts: Vec<&str> = link.split(";").collect();
 
-        let mut number_of_actions = 0;
-        let mut github_action_id = Option::None;
-        while let Some(row) = rows.try_next().await.unwrap() {
-            if number_of_actions > 0 {
-                error!(
-                    "There are more than 1x Github Actions with the same name! (name={}) - skipping this event!",
-                    action_name
-                );
-                return Option::None;
+            if parts.len() != 2 {
+                continue;
             }
 
-            number_of_actions += 1;
-            github_action_id = Some(row.try_get("id").unwrap());
-        }
-
-        github_action_id
-    }
-
-    // // TODO
-    pub async fn fetch_single_github_project_from_db(
-        tx: &mut Transaction<'static, MySql>,
-        platform_project_id: u64,
-    ) -> Option<GithubProject> {
-        let mut rows =
-            sqlx::query("SELECT id, platform_project_id, name, url FROM GitProjects WHERE platform_project_id = ? AND platform = ?")
-                .bind(platform_project_id)
-                .bind(GIT_PLATFORM_ID)
-                .fetch(&mut **tx);
-
-        let mut number_of_projects = 0;
-        let mut github_project = Option::None;
-        while let Some(row) = rows.try_next().await.unwrap() {
-            if number_of_projects > 0 {
-                error!(
-                    "There are more than 1x Github projects in DB (id={}) - skipping this event!",
-                    platform_project_id
-                );
-                return Option::None;
+            let rel_part = parts[1].trim();
+            if rel_part != r#"rel="next""# {
+                continue;
             }
 
-            number_of_projects += 1;
-            let id: u64 = row.try_get("id").unwrap();
-            let platform_project_id: u64 = row.try_get("platform_project_id").unwrap();
-            let name: &str = row.try_get("name").unwrap();
-            let url: &str = row.try_get("url").unwrap();
-            github_project = Some(GithubProject {
-                id,
-                platform_project_id,
-                name: name.to_string(),
-                url: url.to_string(),
-            });
+            let url_part = parts[0].trim();
+            if !(url_part.starts_with("<") && url_part.ends_with(">")) {
+                continue;
+            }
+
+            return Some(url_part[1..url_part.len() - 1].to_string());
         }
 
-        github_project
-    }
-
-    // // TODO
-    async fn write_project_to_db(
-        &self,
-        tx: &mut Transaction<'static, MySql>,
-        project: &GithubProjectAPI
-    ) -> u64 {
-        Github::set_platform(tx).await; // TODO: Only do this at initial setup
-
-        let project_id =
-            sqlx::query("INSERT INTO GitProjects (platform, platform_project_id, name, url) VALUES ( ?, ?, ?, ? )")
-                .bind(GIT_PLATFORM_ID)
-                .bind(project.id.clone())
-                .bind(project.name.clone())
-                .bind(project.url.clone())
-                .execute(&mut **tx)
-                .await
-                .unwrap()
-                .last_insert_id();
-        trace!("Inserted GitProject (Github) id: {}", project_id);
-        project_id
-    }
-
-    // // TODO
-    async fn insert_github_action(
-        tx: &mut Transaction<'static, MySql>,
-        action_name: &String,
-    ) -> u64 {
-        let action_id = sqlx::query("INSERT INTO GitActions (name) VALUES ( ? )")
-            .bind(action_name)
-            .execute(&mut **tx)
-            .await
-            .unwrap()
-            .last_insert_id();
-        trace!("Inserted Github action id: {} ({})", action_id, action_name);
-        return action_id;
-    }
-
-    // // TODO
-    async fn insert_event(tx: &mut Transaction<'static, MySql>, datetime: DateTime<Utc>) -> u64 {
-        let event_id = sqlx::query("INSERT INTO Events (timestamp) VALUES ( ? )")
-            .bind(datetime.format("%Y-%m-%d %H:%M:%S").to_string())
-            .execute(&mut **tx)
-            .await
-            .unwrap()
-            .last_insert_id();
-        trace!("Inserted Github event id: {} @ {}", event_id, datetime);
-        return event_id;
-    }
-
-    // TODO
-    async fn insert_github_event(
-        tx: &mut Transaction<'static, MySql>,
-        event_id: u64,
-        action_id: u64,
-        project_id: u64,
-    ) -> u64 {
-        sqlx::query("INSERT INTO GitEvents (id, action_fk, project_fk) VALUES ( ?, ?, ? )")
-            .bind(event_id)
-            .bind(action_id)
-            .bind(project_id)
-            .execute(&mut **tx)
-            .await
-            .unwrap()
-            .last_insert_id()
+        None
     }
 
     // // TODO
@@ -397,7 +221,7 @@ impl Github {
 
             // TODO: Maybe check if name is still up-to-date etc.
             let github_project_option_future =
-                Github::fetch_single_github_project_from_db(tx_ref, event.repo.id);
+                Github::fetch_single_git_project_from_db(tx_ref, event.repo.id);
 
             let datetime: DateTime<Utc> = match event.created_at.parse() {
                 Ok(datetime) => datetime,
@@ -413,13 +237,21 @@ impl Github {
             let project_id = if let Some(project) = github_project_option_future.await {
                 project.id
             } else {
-                self.write_project_to_db(tx_ref, &event.repo)
-                    .await
+                self.write_project_to_db(
+                    tx_ref,
+                    &GitProject {
+                        id: event.repo.id, // This is kinda cheating... Pls fix
+                        platform_project_id: event.repo.id,
+                        name: event.repo.name.clone(),
+                        url: event.repo.url.clone(),
+                    },
+                )
+                .await
             };
 
             // TODO: Handle push_data (multiple commits!)
             let action_id =
-                match Github::get_github_action_by_name(tx_ref, &event.type_of_action).await {
+                match Github::get_git_action_by_name(tx_ref, &event.type_of_action).await {
                     Some(value) => value,
                     None => Github::insert_github_action(tx_ref, &event.type_of_action).await,
                 };
@@ -465,7 +297,6 @@ mod tests {
     #[tokio::test]
     async fn import_data_from_github_into_database() {
         dotenv().ok();
-        Github::get_or_init();
         let mut github = Github::init_from_env_vars();
 
         let events = github.get_events().await;
