@@ -5,7 +5,7 @@ use log::trace;
 use rocket::futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use sqlx::{MySql, Row, Transaction};
-use time::OffsetDateTime;
+use time::{format_description, OffsetDateTime};
 
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -48,9 +48,10 @@ pub trait GitPlatform {
 
         // Add platform, if it not yet exists
         if rows.is_empty() {
+            let format = format_description::parse("[year]-[month]-[day] [hour]:[minute]:[second]").unwrap();
             sqlx::query("INSERT INTO GitPlatforms (name, firstSync) VALUES ( ?, ? )")
                 .bind(Self::GIT_PLATFORM_ID)
-                .bind(OffsetDateTime::now_utc().date().to_string())
+                .bind(OffsetDateTime::now_utc().format(&format).unwrap())
                 .execute(&mut **tx)
                 .await
                 .unwrap();
