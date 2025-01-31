@@ -27,7 +27,7 @@ CREATE TABLE `Events` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `timestamp` datetime NOT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=60 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -42,7 +42,7 @@ CREATE TABLE `GitActions` (
   `name` varchar(100) NOT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `GitActions_UNIQUE` (`name`)
-) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -59,10 +59,10 @@ CREATE TABLE `GitEvents` (
   PRIMARY KEY (`id`),
   KEY `GitEvents_GitProjects_FK` (`project_fk`),
   KEY `GitEvents_GitAction_FK` (`action_fk`),
-  CONSTRAINT `GitEvents_Events_FK` FOREIGN KEY (`id`) REFERENCES `Events` (`id`),
-  CONSTRAINT `GitEvents_GitActions_FK` FOREIGN KEY (`action_fk`) REFERENCES `GitActions` (`id`),
-  CONSTRAINT `GitEvents_GitProjects_FK` FOREIGN KEY (`project_fk`) REFERENCES `GitProjects` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=60 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
+  CONSTRAINT `GitEvents_Events_FK` FOREIGN KEY (`id`) REFERENCES `Events` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `GitEvents_GitActions_FK` FOREIGN KEY (`action_fk`) REFERENCES `GitActions` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `GitEvents_GitProjects_FK` FOREIGN KEY (`project_fk`) REFERENCES `GitProjects` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -95,8 +95,8 @@ CREATE TABLE `GitProjects` (
   `platform_project_id` int(10) unsigned NOT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `GitProjects_UNIQUE` (`platform`,`platform_project_id`),
-  CONSTRAINT `GitProjects_GitPlatforms_FK` FOREIGN KEY (`platform`) REFERENCES `GitPlatforms` (`name`)
-) ENGINE=InnoDB AUTO_INCREMENT=14 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
+  CONSTRAINT `GitProjects_GitPlatforms_FK` FOREIGN KEY (`platform`) REFERENCES `GitPlatforms` (`name`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -126,4 +126,4 @@ CREATE TABLE `_sqlx_migrations` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*M!100616 SET NOTE_VERBOSITY=@OLD_NOTE_VERBOSITY */;
 
--- Dump completed on 2025-01-31 15:10:38
+-- Dump completed on 2025-01-31 15:33:02
