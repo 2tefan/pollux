@@ -74,6 +74,7 @@ DROP TABLE IF EXISTS `GitPlatforms`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `GitPlatforms` (
   `name` varchar(100) NOT NULL,
+  `firstSync` datetime NOT NULL,
   `lastSync` datetime DEFAULT NULL,
   PRIMARY KEY (`name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
@@ -125,4 +126,4 @@ CREATE TABLE `_sqlx_migrations` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*M!100616 SET NOTE_VERBOSITY=@OLD_NOTE_VERBOSITY */;
 
--- Dump completed on 2025-01-25 13:02:54
+-- Dump completed on 2025-01-31 15:10:38
