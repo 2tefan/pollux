@@ -134,7 +134,7 @@ impl GitPlatform for Github {
                         .parse()
                         .expect("Couldn't parse link header from Github response!"),
                 ),
-                None => panic!("Didn't got link header back from Github!"),
+                None => panic!("Didn't get link header back from Github!\nHeaders: {:?}\n\nResponse: {:?}", header, payload),
             };
 
             if let Some(etag) = header.get("etag") {
