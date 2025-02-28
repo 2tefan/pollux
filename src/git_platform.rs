@@ -1,12 +1,9 @@
-
-
 use chrono::{DateTime, Utc};
 use log::trace;
 use rocket::futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use sqlx::{MySql, Row, Transaction};
 use time::{format_description, OffsetDateTime};
-
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GitProject {
@@ -16,13 +13,11 @@ pub struct GitProject {
     pub url: String,
 }
 
-pub trait GitEventAPI {
-}
+pub trait GitEventAPI {}
 
 pub trait GitPlatform {
     const GIT_PLATFORM_ID: &'static str;
     type GitEventAPI: GitEventAPI;
-
 
     fn init_from_env_vars() -> Self;
 
@@ -41,14 +36,15 @@ pub trait GitPlatform {
 
         if rows.len() > 1 {
             panic!(
-            "There are more than 1x platforms with the same name! (name={}) - This can't be!",
-            Self::GIT_PLATFORM_ID
-        );
+                "There are more than 1x platforms with the same name! (name={}) - This can't be!",
+                Self::GIT_PLATFORM_ID
+            );
         }
 
         // Add platform, if it not yet exists
         if rows.is_empty() {
-            let format = format_description::parse("[year]-[month]-[day] [hour]:[minute]:[second]").unwrap();
+            let format =
+                format_description::parse("[year]-[month]-[day] [hour]:[minute]:[second]").unwrap();
             sqlx::query("INSERT INTO GitPlatforms (name, firstSync) VALUES ( ?, ? )")
                 .bind(Self::GIT_PLATFORM_ID)
                 .bind(OffsetDateTime::now_utc().format(&format).unwrap())
@@ -82,6 +78,44 @@ pub trait GitPlatform {
         }
 
         git_action_id
+    }
+
+    async fn count_all_matching_events(
+        tx: &mut Transaction<'static, MySql>,
+        datetime: &DateTime<Utc>,
+        action_id: &u64,
+        project_id: &u64,
+    ) -> i64 {
+        // i64 needed by sqlx return type
+        let result = sqlx::query(
+                "SELECT COUNT(1) AS CNT FROM GitEvents AS ge, Events AS e \
+                WHERE ge.id = e.id \
+                AND e.timestamp = ? \
+                AND ge.project_fk = ? \
+                AND ge.action_fk = ?",
+            )
+            .bind(datetime.format("%Y-%m-%d %H:%M:%S").to_string())
+            .bind(project_id)
+            .bind(action_id)
+            .fetch_one(&mut **tx);
+
+        let query_option = Some(result.await.unwrap().try_get("CNT").unwrap());
+
+        if query_option.is_none() {
+            return 0;
+        }
+
+        let number_of_rows = query_option.unwrap();
+
+        if number_of_rows > 1 {
+            error!(
+                "There are {}x events with the same action (id={}) on the same project (id={}) at the same time ({}). \
+                This means there are already duplicate events in your DB!",
+                number_of_rows, action_id, project_id, datetime
+            );
+        }
+
+        number_of_rows
     }
 
     async fn fetch_single_git_project_from_db(
@@ -124,7 +158,7 @@ pub trait GitPlatform {
     async fn write_project_to_db(
         &self,
         tx: &mut Transaction<'static, MySql>,
-        project: &GitProject
+        project: &GitProject,
     ) -> u64 {
         Self::set_platform(tx).await; // TODO: Only do this at initial setup
 
@@ -138,21 +172,27 @@ pub trait GitPlatform {
                 .await
                 .unwrap()
                 .last_insert_id();
-        trace!("Inserted GitProject ({}) id: {}", Self::GIT_PLATFORM_ID, project_id);
+        trace!(
+            "Inserted GitProject ({}) id: {}",
+            Self::GIT_PLATFORM_ID,
+            project_id
+        );
         project_id
     }
 
-    async fn insert_git_action(
-        tx: &mut Transaction<'static, MySql>,
-        action_name: &String,
-    ) -> u64 {
+    async fn insert_git_action(tx: &mut Transaction<'static, MySql>, action_name: &String) -> u64 {
         let action_id = sqlx::query("INSERT INTO GitActions (name) VALUES ( ? )")
             .bind(action_name)
             .execute(&mut **tx)
             .await
             .unwrap()
             .last_insert_id();
-        trace!("Inserted Git action ({}) - id: {} ({})", Self::GIT_PLATFORM_ID, action_id, action_name);
+        trace!(
+            "Inserted Git action ({}) - id: {} ({})",
+            Self::GIT_PLATFORM_ID,
+            action_id,
+            action_name
+        );
         return action_id;
     }
 
@@ -163,7 +203,12 @@ pub trait GitPlatform {
             .await
             .unwrap()
             .last_insert_id();
-        trace!("Inserted Git event ({}) - id: {} @ {}", Self::GIT_PLATFORM_ID, event_id, datetime);
+        trace!(
+            "Inserted Git event ({}) - id: {} @ {}",
+            Self::GIT_PLATFORM_ID,
+            event_id,
+            datetime
+        );
         return event_id;
     }
 

@@ -254,7 +254,6 @@ impl Gitlab {
             };
 
             // Inserting GitlabProject
-            // TODO fetching name + url from gitlab and insert it, if missing
             let project_id = if let Some(project) = gitlab_project_option_future.await {
                 project.id
             } else {
@@ -268,6 +267,11 @@ impl Gitlab {
                     Some(value) => value,
                     None => Gitlab::insert_git_action(tx_ref, &event.action_name).await,
                 };
+
+            if Gitlab::count_all_matching_events(tx_ref, &datetime, &action_id, &project_id).await > 0 {
+                debug!("Skipping insert! Event already exists");
+                continue;
+            }
 
             // Add event itself
             let event_id = Gitlab::insert_event(tx_ref, datetime).await;

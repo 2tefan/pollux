@@ -260,6 +260,12 @@ impl Github {
                     None => Github::insert_git_action(tx_ref, &event.type_of_action).await,
                 };
 
+
+            if Github::count_all_matching_events(tx_ref, &datetime, &action_id, &project_id).await > 0 {
+                debug!("Skipping insert! Event already exists");
+                continue;
+            }
+
             // Add event itself
             let event_id = Github::insert_event(tx_ref, datetime).await;
 

@@ -27,6 +27,7 @@ impl Database {
         .await
         .unwrap();
 
+        debug!("Running DB migrations!");
         match sqlx::migrate!().run(&pool).await {
             Ok(result) => result,
             Err(err) => panic!("Couldn't run db migrations: {}", err),

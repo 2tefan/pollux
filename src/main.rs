@@ -9,14 +9,30 @@ mod git_platform;
 
 use cronjob::CronJob;
 use dotenv::dotenv;
+use git_platform::GitPlatform;
+use github::Github;
 use gitlab::Gitlab;
 use rocket::http::{ContentType, Status};
 
 #[get("/")]
 async fn index() -> (Status, (ContentType, String)) {
-    //unsafe { format!("Hello, world! {}, {}", MY_COUNTER.unwrap_or(0)) }
+    dotenv().ok();
+    let mut github = Github::init_from_env_vars();
+    let gitlab = Gitlab::init_from_env_vars();
+
+    let events = github.get_events().await;
+    github.insert_github_events_into_db(events).await;
+
+
+    let events = gitlab
+        .get_events(
+            time::macros::date!(2024 - 05 - 03),
+            time::macros::date!(2024 - 05 - 05), // (OffsetDateTime::now_utc() + Duration::days(-85)).date(),
+        )
+        .await;
+    gitlab.insert_gitlab_events_into_db(events).await;
     (
-        Status::ImATeapot,
+        Status::Ok,
         (
             ContentType::Text,
             "Hello".to_string(), // Gitlab::global()
