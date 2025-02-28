@@ -127,7 +127,7 @@ impl Gitlab {
                 None => panic!("Didn't got x-total header back from Gitlab!"),
             };
             if current_page == 1 && total_pages > 20 {
-                warn!("Getting more than 20 pages/400 events! [{}]", total_pages)
+                warn!("Getting more than 20 pages/400 events! [{} pages]", total_pages)
             }
 
             match header.get("x-page") {
