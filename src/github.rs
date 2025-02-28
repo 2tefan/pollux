@@ -127,7 +127,6 @@ impl GitPlatform for Github {
                 panic!("Couldn't fetch events from Github! {}", status.as_str());
             }
 
-
             let mut data: Vec<GithubEvent> = match serde_json::from_str(&payload) {
                 Ok(data) => data,
                 Err(err) => panic!(
@@ -145,7 +144,6 @@ impl GitPlatform for Github {
                 }
                 self.e_tag[current_page - 1] = etag.clone();
             }
-
 
             if log_enabled!(Level::Debug) {
                 for element in data {
@@ -213,15 +211,19 @@ impl Github {
         None
     }
 
-    // // TODO
     pub async fn insert_github_events_into_db(&self, events: Vec<GithubEvent>) {
         let db = database::Database::get_or_init().await;
         let pool = db.get_pool().await;
+
+        info!("Starting to insert events from Github");
+        let mut total_events = 0;
+        let mut added_events = 0;
 
         for event in events.iter() {
             // Starting transaction 💪
             let mut tx = pool.begin().await.expect("Couldn't start transaction!");
             let tx_ref = tx.borrow_mut();
+            total_events += 1;
 
             // TODO: Maybe check if name is still up-to-date etc.
             let github_project_option_future =
@@ -260,8 +262,9 @@ impl Github {
                     None => Github::insert_git_action(tx_ref, &event.type_of_action).await,
                 };
 
-
-            if Github::count_all_matching_events(tx_ref, &datetime, &action_id, &project_id).await > 0 {
+            if Github::count_all_matching_events(tx_ref, &datetime, &action_id, &project_id).await
+                > 0
+            {
                 debug!("Skipping insert! Event already exists");
                 continue;
             }
@@ -273,7 +276,10 @@ impl Github {
                 Github::insert_git_event(&mut tx, event_id, action_id, project_id).await;
 
             tx.commit().await.expect("Couldn't apply transaction ._.");
+            added_events += 1;
         }
+
+        info!("Inserted {} new Github events from {} total events into DB", added_events, total_events);
     }
 }
 

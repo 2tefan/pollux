@@ -13,36 +13,62 @@ use git_platform::GitPlatform;
 use github::Github;
 use gitlab::Gitlab;
 use rocket::http::{ContentType, Status};
+use time::{Duration, OffsetDateTime};
+use tokio::join;
 
-#[get("/")]
-async fn index() -> (Status, (ContentType, String)) {
-    dotenv().ok();
+async fn fetch_data_from_git_providers() {
     let mut github = Github::init_from_env_vars();
     let gitlab = Gitlab::init_from_env_vars();
 
-    let events = github.get_events().await;
-    github.insert_github_events_into_db(events).await;
 
+    let (_github_result, _gitlab_result) = join!(
+        async {
+            let events = github.get_events().await;
+            github.insert_github_events_into_db(events).await;
+        },
+        async {
+            let events = gitlab
+                .get_events(
+                    (OffsetDateTime::now_utc() + Duration::days(-90)).date(), // TODO: Remove magic number
+                    (OffsetDateTime::now_utc()).date(),
+                )
+                .await;
+            gitlab.insert_gitlab_events_into_db(events).await;
+        }
+    );
+}
 
-    let events = gitlab
-        .get_events(
-            time::macros::date!(2024 - 05 - 03),
-            time::macros::date!(2024 - 05 - 05), // (OffsetDateTime::now_utc() + Duration::days(-85)).date(),
-        )
-        .await;
-    gitlab.insert_gitlab_events_into_db(events).await;
-    (
-        Status::Ok,
+#[get("/force-sync")]
+async fn index() -> (Status, (ContentType, String)) {
+    let dev_mode = std::env::var("POLLUX_ENABLE_DEV_MODE");
+    if dev_mode.is_ok() && dev_mode.unwrap().to_ascii_lowercase() == "true" {
+        fetch_data_from_git_providers().await;
         (
-            ContentType::Text,
-            "Hello".to_string(), // Gitlab::global()
-                                 //     .get_events(
-                                 //         (OffsetDateTime::now_utc() + Duration::days(-2)).date(),
-                                 //         (OffsetDateTime::now_utc() + Duration::days(0)).date(),
-                                 //     )
-                                 //     .await,
-        ),
-    )
+            Status::Ok,
+            (
+                ContentType::Text,
+                "fetching done".to_string(), // Gitlab::global()
+                                    //     .get_events(
+                                    //         (OffsetDateTime::now_utc() + Duration::days(-2)).date(),
+                                    //         (OffsetDateTime::now_utc() + Duration::days(0)).date(),
+                                    //     )
+                                    //     .await,
+            ),
+        )
+    } else { 
+        (
+            Status::Forbidden,
+            (
+                ContentType::Text,
+                "Not allowed in prod!".to_string(), // Gitlab::global()
+                                    //     .get_events(
+                                    //         (OffsetDateTime::now_utc() + Duration::days(-2)).date(),
+                                    //         (OffsetDateTime::now_utc() + Duration::days(0)).date(),
+                                    //     )
+                                    //     .await,
+            ),
+        )
+    }
 }
 
 #[launch]

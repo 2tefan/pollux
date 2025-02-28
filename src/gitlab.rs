@@ -1,4 +1,7 @@
-use crate::{database, git_platform::{GitEventAPI, GitPlatform}};
+use crate::{
+    database,
+    git_platform::{GitEventAPI, GitPlatform},
+};
 
 use std::borrow::BorrowMut;
 
@@ -127,7 +130,10 @@ impl Gitlab {
                 None => panic!("Didn't got x-total header back from Gitlab!"),
             };
             if current_page == 1 && total_pages > 20 {
-                warn!("Getting more than 20 pages/400 events! [{} pages]", total_pages)
+                warn!(
+                    "Getting more than 20 pages/400 events! [{} pages]",
+                    total_pages
+                )
             }
 
             match header.get("x-page") {
@@ -225,20 +231,15 @@ impl Gitlab {
         let db = database::Database::get_or_init().await;
         let pool = db.get_pool().await;
 
-        let tables: Vec<(String,)> = sqlx::query_as("SHOW TABLES")
-            .fetch_all(&pool)
-            .await
-            .unwrap();
-
-        for table in tables.iter() {
-            println!("{}", table.0);
-            println!("{:?}", table);
-        }
+        info!("Starting to insert events from Gitlab");
+        let mut total_events = 0;
+        let mut added_events = 0;
 
         for event in events.iter() {
             // Starting transaction 💪
             let mut tx = pool.begin().await.expect("Couldn't start transaction!");
             let tx_ref = tx.borrow_mut();
+            total_events += 1;
 
             // TODO: Maybe check if name is still up-to-date etc.
             let gitlab_project_option_future =
@@ -248,7 +249,11 @@ impl Gitlab {
                 Ok(datetime) => datetime,
                 Err(err) => {
                     // Parsing failed - https://docs.rs/chrono/latest/chrono/struct.DateTime.html#impl-FromStr-for-DateTime%3CUtc%3E
-                    error!("Couldn't parse date from Gitlab using a relaxed form of RFC3339. Event will be skipped! Received 'created_at' value: {} - error msg: {}", event.created_at, err);
+                    error!(
+                        "Couldn't parse date from Gitlab using a relaxed form of RFC3339. \
+                    Event will be skipped! Received 'created_at' value: {} - error msg: {}",
+                        event.created_at, err
+                    );
                     continue;
                 }
             };
@@ -262,13 +267,14 @@ impl Gitlab {
             };
 
             // TODO: Handle push_data (multiple commits!)
-            let action_id =
-                match Gitlab::get_git_action_by_name(tx_ref, &event.action_name).await {
-                    Some(value) => value,
-                    None => Gitlab::insert_git_action(tx_ref, &event.action_name).await,
-                };
+            let action_id = match Gitlab::get_git_action_by_name(tx_ref, &event.action_name).await {
+                Some(value) => value,
+                None => Gitlab::insert_git_action(tx_ref, &event.action_name).await,
+            };
 
-            if Gitlab::count_all_matching_events(tx_ref, &datetime, &action_id, &project_id).await > 0 {
+            if Gitlab::count_all_matching_events(tx_ref, &datetime, &action_id, &project_id).await
+                > 0
+            {
                 debug!("Skipping insert! Event already exists");
                 continue;
             }
@@ -288,9 +294,13 @@ impl Gitlab {
             // trace!("Inserted Gitlab event id: {} @ {}", event_id, datetime);
 
             tx.commit().await.expect("Couldn't apply transaction ._.");
+            added_events += 1;
         }
 
-        assert!(tables.len() > 0);
+        info!(
+            "Inserted {} new Gitlab events from {} total events into DB",
+            added_events, total_events
+        );
     }
 }
 
