@@ -54,6 +54,18 @@ pub trait GitPlatform {
         }
     }
 
+    async fn update_last_sync_timestamp(tx: &mut Transaction<'static, MySql>) {
+        let format =
+            format_description::parse("[year]-[month]-[day] [hour]:[minute]:[second]").unwrap();
+
+        sqlx::query("UPDATE GitPlatforms SET lastSync = ? WHERE name = ?")
+            .bind(OffsetDateTime::now_utc().format(&format).unwrap())
+            .bind(Self::GIT_PLATFORM_ID)
+            .execute(&mut **tx)
+            .await
+            .unwrap();
+    }
+
     async fn get_git_action_by_name(
         tx: &mut Transaction<'static, MySql>,
         action_name: &String,
@@ -88,16 +100,16 @@ pub trait GitPlatform {
     ) -> i64 {
         // i64 needed by sqlx return type
         let result = sqlx::query(
-                "SELECT COUNT(1) AS CNT FROM GitEvents AS ge, Events AS e \
+            "SELECT COUNT(1) AS CNT FROM GitEvents AS ge, Events AS e \
                 WHERE ge.id = e.id \
                 AND e.timestamp = ? \
                 AND ge.project_fk = ? \
                 AND ge.action_fk = ?",
-            )
-            .bind(datetime.format("%Y-%m-%d %H:%M:%S").to_string())
-            .bind(project_id)
-            .bind(action_id)
-            .fetch_one(&mut **tx);
+        )
+        .bind(datetime.format("%Y-%m-%d %H:%M:%S").to_string())
+        .bind(project_id)
+        .bind(action_id)
+        .fetch_one(&mut **tx);
 
         let query_option = Some(result.await.unwrap().try_get("CNT").unwrap());
 

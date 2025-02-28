@@ -235,10 +235,11 @@ impl Gitlab {
         let mut total_events = 0;
         let mut added_events = 0;
 
+        // Starting transaction 💪
+        let mut tx = pool.begin().await.expect("Couldn't start transaction!");
+        let tx_ref = tx.borrow_mut();
+
         for event in events.iter() {
-            // Starting transaction 💪
-            let mut tx = pool.begin().await.expect("Couldn't start transaction!");
-            let tx_ref = tx.borrow_mut();
             total_events += 1;
 
             // TODO: Maybe check if name is still up-to-date etc.
@@ -283,7 +284,7 @@ impl Gitlab {
             let event_id = Gitlab::insert_event(tx_ref, datetime).await;
 
             let gitlab_event_id =
-                Gitlab::insert_git_event(&mut tx, event_id, action_id, project_id).await;
+                Gitlab::insert_git_event(tx_ref, event_id, action_id, project_id).await;
 
             // let event_id = sqlx::query("INSERT INTO GitlabProjects (id, name, url) VALUES ( ? )")
             //     .bind(event.)
@@ -293,10 +294,11 @@ impl Gitlab {
             //     .last_insert_id();
             // trace!("Inserted Gitlab event id: {} @ {}", event_id, datetime);
 
-            tx.commit().await.expect("Couldn't apply transaction ._.");
             added_events += 1;
         }
 
+        Gitlab::update_last_sync_timestamp(tx_ref).await;
+        tx.commit().await.expect("Couldn't apply transaction ._.");
         info!(
             "Inserted {} new Gitlab events from {} total events into DB",
             added_events, total_events
