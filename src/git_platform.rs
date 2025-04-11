@@ -252,15 +252,15 @@ pub trait GitPlatform {
     }
 
 
-    fn map_action_name(input: &str) -> &str {
+    fn map_action_name(input: &str) -> Option<&str> {
         match input {
-            "pushed to" | "pushed new" | "PushEvent" | "CreateEvent" => "commit",
-            "deleted" | "closed" | "accepted" | "opened" => "merge-request",
-            "commented on" | "IssueCommentEvent" | "IssuesEvent" => "comments",
-            "created" | "WatchEvent" => "project-management",
+            "pushed to" | "pushed new" | "PushEvent" | "CreateEvent" => Some("commit"),
+            "deleted" | "closed" | "accepted" | "opened" => Some("merge-request"),
+            "commented on" | "IssueCommentEvent" | "IssuesEvent" => Some("comments"),
+            "created" | "WatchEvent" => Some("project-management"),
             _ => {
                 warn!("Action name not known! {} - pls open a issue, so this action name can be added! Will just use string as is for now...", input);
-                input
+                None
             },
         }
     }

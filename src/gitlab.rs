@@ -266,8 +266,13 @@ impl Gitlab {
                     .await
             };
 
-            let action_name = Gitlab::map_action_name(event.action_name.as_str());
-
+            let action_name = match Gitlab::map_action_name(event.action_name.as_str()) {
+                Some(value) => value,
+                None => {
+                    warn!("Skipping event - because action name unknown! {:#?}", event);
+                    continue;
+                }
+            };
             // TODO: Handle push_data (multiple commits!)
             let action_id = match Gitlab::get_git_action_by_name(tx_ref, &action_name).await {
                 Some(value) => value,

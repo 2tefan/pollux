@@ -254,7 +254,14 @@ impl Github {
                 .await
             };
 
-            let action_name = Github::map_action_name(event.type_of_action.as_str());
+            let action_name = match Github::map_action_name(event.type_of_action.as_str()) {
+                Some(value) => value,
+                None => {
+                    warn!("Skipping event - because type of action is unknown! {:#?}", event);
+                    continue;
+                }
+            };
+
             // TODO: Handle push_data (multiple commits!)
             let action_id =
                 match Github::get_git_action_by_name(tx_ref, action_name).await {
