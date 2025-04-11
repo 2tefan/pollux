@@ -15,6 +15,13 @@ use gitlab::Gitlab;
 use rocket::http::{ContentType, Status};
 use time::{Duration, OffsetDateTime};
 use tokio::join;
+use serde::Serialize;
+use rocket::serde::json::Json;
+
+#[derive(Serialize)]
+struct HealthResponse {
+    status: &'static str,
+}
 
 async fn fetch_data_from_git_providers() {
     let mut github = Github::init_from_env_vars();
@@ -38,8 +45,13 @@ async fn fetch_data_from_git_providers() {
     );
 }
 
+#[get("/health")]
+fn health() -> Json<HealthResponse> {
+    Json(HealthResponse { status: "ok" })
+}
+
 #[get("/force-sync")]
-async fn index() -> (Status, (ContentType, String)) {
+async fn force_sync() -> (Status, (ContentType, String)) {
     let dev_mode = std::env::var("POLLUX_ENABLE_DEV_MODE");
     if dev_mode.is_ok() && dev_mode.unwrap().to_ascii_lowercase() == "true" {
         fetch_data_from_git_providers().await;
@@ -84,8 +96,9 @@ fn rocket() -> _ {
     CronJob::start_job_threaded(cron);
 
     Gitlab::get_or_init();
+    Github::get_or_init();
 
-    rocket::build().mount("/", routes![index])
+    rocket::build().mount("/", routes![force_sync, health])
 }
 
 // Our cronjob handler.
