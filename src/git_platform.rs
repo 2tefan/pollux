@@ -79,7 +79,7 @@ pub trait GitPlatform {
 
     async fn get_git_action_by_name(
         tx: &mut Transaction<'static, MySql>,
-        action_name: &String,
+        action_name: &str,
     ) -> Option<u64> {
         let mut rows = sqlx::query("SELECT id FROM GitActions WHERE name = ?")
             .bind(action_name)
@@ -203,7 +203,7 @@ pub trait GitPlatform {
         project_id
     }
 
-    async fn insert_git_action(tx: &mut Transaction<'static, MySql>, action_name: &String) -> u64 {
+    async fn insert_git_action(tx: &mut Transaction<'static, MySql>, action_name: &str) -> u64 {
         let action_id = sqlx::query("INSERT INTO GitActions (name) VALUES ( ? )")
             .bind(action_name)
             .execute(&mut **tx)
@@ -250,6 +250,21 @@ pub trait GitPlatform {
             .unwrap()
             .last_insert_id()
     }
+
+
+    fn map_action_name(input: &str) -> &str {
+        match input {
+            "pushed to" | "pushed new" | "PushEvent" | "CreateEvent" => "commit",
+            "deleted" | "closed" | "accepted" | "opened" => "merge-request",
+            "commented on" | "IssueCommentEvent" | "IssuesEvent" => "comments",
+            "created" | "WatchEvent" => "project-management",
+            _ => {
+                warn!("Action name not known! {} - pls open a issue, so this action name can be added! Will just use string as is for now...", input);
+                input
+            },
+        }
+    }
+
 
     async fn get_all_git_events() -> Vec<GitEvents> {
         let db = database::Database::get_or_init().await;

@@ -6,7 +6,7 @@ use crate::{
 use std::borrow::BorrowMut;
 
 use chrono::{DateTime, Utc};
-use log::{error, log_enabled, trace, Level};
+use log::{error, log_enabled, trace, warn, Level};
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use sqlx::{MySql, Transaction};
@@ -266,10 +266,12 @@ impl Gitlab {
                     .await
             };
 
+            let action_name = Gitlab::map_action_name(event.action_name.as_str());
+
             // TODO: Handle push_data (multiple commits!)
-            let action_id = match Gitlab::get_git_action_by_name(tx_ref, &event.action_name).await {
+            let action_id = match Gitlab::get_git_action_by_name(tx_ref, &action_name).await {
                 Some(value) => value,
-                None => Gitlab::insert_git_action(tx_ref, &event.action_name).await,
+                None => Gitlab::insert_git_action(tx_ref, &action_name).await,
             };
 
             if Gitlab::count_all_matching_events(tx_ref, &datetime, &action_id, &project_id).await

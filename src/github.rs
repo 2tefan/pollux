@@ -254,11 +254,12 @@ impl Github {
                 .await
             };
 
+            let action_name = Github::map_action_name(event.type_of_action.as_str());
             // TODO: Handle push_data (multiple commits!)
             let action_id =
-                match Github::get_git_action_by_name(tx_ref, &event.type_of_action).await {
+                match Github::get_git_action_by_name(tx_ref, action_name).await {
                     Some(value) => value,
-                    None => Github::insert_git_action(tx_ref, &event.type_of_action).await,
+                    None => Github::insert_git_action(tx_ref, action_name).await,
                 };
 
             if Github::count_all_matching_events(tx_ref, &datetime, &action_id, &project_id).await
