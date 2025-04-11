@@ -13,10 +13,8 @@ use reqwest::{
     StatusCode,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 
 static GITHUB: OnceCell<Github> = OnceCell::new();
-static GIT_PLATFORM_ID: &str = "Github";
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GithubEvent {
@@ -273,7 +271,7 @@ impl Github {
             // Add event itself
             let event_id = Github::insert_event(tx_ref, datetime).await;
 
-            let github_event_id =
+            let _github_event_id =
                 Github::insert_git_event(tx_ref, event_id, action_id, project_id).await;
 
             added_events += 1;

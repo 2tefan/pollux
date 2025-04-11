@@ -1,6 +1,6 @@
 use crate::{
     database,
-    git_platform::{GitEventAPI, GitEvents, GitPlatform},
+    git_platform::{GitEventAPI, GitPlatform},
 };
 
 use std::borrow::BorrowMut;
@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use log::{error, log_enabled, trace, Level};
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
-use sqlx::{MySql, Row, Transaction};
+use sqlx::{MySql, Transaction};
 use time::Date;
 
 static GITLAB: OnceCell<Gitlab> = OnceCell::new();
@@ -105,7 +105,7 @@ impl Gitlab {
 
             let initial_res = match res {
                 Ok(initial_response) => initial_response,
-                Err(err) => panic!("Unable to get response from Gitlab!"),
+                Err(err) => panic!("Unable to get response from Gitlab!: {}", err),
             };
 
             let status = initial_res.status();
@@ -177,7 +177,6 @@ impl Gitlab {
     pub async fn get_project_details_by_id(&self, gitlab_project_id: u64) -> GitlabProjectAPI {
         let client = reqwest::Client::new();
         let token = &self.token;
-        let user_id = &self.user_id;
         let url = format!("https://gitlab.com/api/v4/projects/{}", gitlab_project_id);
 
         info!("Getting project info from Gitlab... ({})", url);
@@ -186,7 +185,7 @@ impl Gitlab {
 
         let initial_res = match res {
             Ok(initial_response) => initial_response,
-            Err(err) => panic!("Unable to get response from Gitlab!"),
+            Err(err) => panic!("Unable to get response from Gitlab! {}", err),
         };
 
         let payload = match initial_res.text().await {
@@ -283,7 +282,7 @@ impl Gitlab {
             // Add event itself
             let event_id = Gitlab::insert_event(tx_ref, datetime).await;
 
-            let gitlab_event_id =
+            let _gitlab_event_id =
                 Gitlab::insert_git_event(tx_ref, event_id, action_id, project_id).await;
 
             // let event_id = sqlx::query("INSERT INTO GitlabProjects (id, name, url) VALUES ( ? )")
