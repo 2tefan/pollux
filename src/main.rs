@@ -59,12 +59,7 @@ async fn force_sync() -> (Status, (ContentType, String)) {
             Status::Ok,
             (
                 ContentType::Text,
-                "fetching done".to_string(), // Gitlab::global()
-                                    //     .get_events(
-                                    //         (OffsetDateTime::now_utc() + Duration::days(-2)).date(),
-                                    //         (OffsetDateTime::now_utc() + Duration::days(0)).date(),
-                                    //     )
-                                    //     .await,
+                "fetching done".to_string(),
             ),
         )
     } else { 
@@ -72,12 +67,7 @@ async fn force_sync() -> (Status, (ContentType, String)) {
             Status::Forbidden,
             (
                 ContentType::Text,
-                "Not allowed in prod!".to_string(), // Gitlab::global()
-                                    //     .get_events(
-                                    //         (OffsetDateTime::now_utc() + Duration::days(-2)).date(),
-                                    //         (OffsetDateTime::now_utc() + Duration::days(0)).date(),
-                                    //     )
-                                    //     .await,
+                "Not allowed in prod!".to_string(),
             ),
         )
     }
