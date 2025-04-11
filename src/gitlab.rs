@@ -5,12 +5,12 @@ use crate::{
 
 use std::borrow::BorrowMut;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, Utc};
 use log::{error, log_enabled, trace, warn, Level};
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use sqlx::{MySql, Transaction};
-use time::Date;
+use time::{Date, Duration, OffsetDateTime};
 
 static GITLAB: OnceCell<Gitlab> = OnceCell::new();
 
@@ -65,7 +65,19 @@ impl GitPlatform for Gitlab {
     }
 
     async fn get_events(&mut self) -> Vec<Self::GitEventAPI> {
-        todo!()
+        let last_sync = Gitlab::get_last_sync_timestamp().await;
+        Gitlab::get_events(
+            &self, 
+            last_sync,
+            Utc::now()
+        ).await
+    }
+
+    async fn update_provider(&mut self) -> Option<i32> {
+        let events = self.get_events().await;
+        let new_events = self.insert_gitlab_events_into_db(events).await;
+
+        Some(new_events)
     }
 }
 
@@ -74,15 +86,15 @@ impl Gitlab {
         GITLAB.get_or_init(|| Self::init_from_env_vars());
     }
 
-    pub async fn get_events(&self, after: Date, before: Date) -> Vec<GitlabEvent> {
+    pub async fn get_events(&self, after: DateTime<Utc>, before: DateTime<Utc>) -> Vec<GitlabEvent> {
         let client = reqwest::Client::new();
         let token = &self.token;
         let user_id = &self.user_id;
         let url = format!(
             "https://gitlab.com/api/v4/users/{}/events?after={}&before={}",
             user_id,
-            after.to_string(),
-            before.to_string()
+            after.format("%Y-%m-%d").to_string(),
+            before.format("%Y-%m-%d").to_string()
         );
 
         if after >= before {
@@ -226,7 +238,7 @@ impl Gitlab {
         project_id
     }
 
-    pub async fn insert_gitlab_events_into_db(&self, events: Vec<GitlabEvent>) {
+    pub async fn insert_gitlab_events_into_db(&self, events: Vec<GitlabEvent>) -> i32 {
         let db = database::Database::get_or_init().await;
         let pool = db.get_pool().await;
 
@@ -309,12 +321,15 @@ impl Gitlab {
             "Inserted {} new Gitlab events from {} total events into DB",
             added_events, total_events
         );
+
+        added_events
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{NaiveDate, TimeZone};
     use dotenv::dotenv;
 
     #[tokio::test]
@@ -324,8 +339,8 @@ mod tests {
 
         let result = gitlab
             .get_events(
-                time::macros::date!(2024 - 05 - 01),
-                time::macros::date!(2024 - 05 - 05), // (OffsetDateTime::now_utc() + Duration::days(-85)).date(),
+                Utc.with_ymd_and_hms(2024, 05, 01, 0, 0, 0).unwrap(),
+                Utc.with_ymd_and_hms(2024, 05, 05, 0, 0, 0).unwrap(),
             )
             .await;
         //assert_eq!(result, OffsetDateTime::now_utc().date().to_string())
@@ -340,8 +355,8 @@ mod tests {
 
         let result = gitlab
             .get_events(
-                time::macros::date!(2024 - 05 - 03),
-                time::macros::date!(2024 - 05 - 05), // (OffsetDateTime::now_utc() + Duration::days(-85)).date(),
+                Utc.with_ymd_and_hms(2024, 05, 03, 0, 0, 0).unwrap(),
+                Utc.with_ymd_and_hms(2024, 05, 05, 0, 0, 0).unwrap(),
             )
             .await;
         assert_eq!(result.len(), 4);
@@ -374,8 +389,8 @@ mod tests {
 
         let events = gitlab
             .get_events(
-                time::macros::date!(2024 - 05 - 03),
-                time::macros::date!(2024 - 05 - 05), // (OffsetDateTime::now_utc() + Duration::days(-85)).date(),
+                Utc.with_ymd_and_hms(2024, 05, 03, 0, 0, 0).unwrap(),
+                Utc.with_ymd_and_hms(2024, 05, 05, 0, 0, 0).unwrap(),
             )
             .await;
         gitlab.insert_gitlab_events_into_db(events).await; // TODO: Fix test

@@ -12,8 +12,8 @@ use dotenv::dotenv;
 use git_platform::{GitEvents, GitPlatform};
 use github::Github;
 use gitlab::Gitlab;
+use log::error;
 use rocket::http::{ContentType, Status};
-use time::{Duration, OffsetDateTime};
 use tokio::join;
 use serde::Serialize;
 use rocket::serde::json::Json;
@@ -25,24 +25,23 @@ struct HealthResponse {
 
 async fn fetch_data_from_git_providers() {
     let mut github = Github::init_from_env_vars();
-    let gitlab = Gitlab::init_from_env_vars();
+    let mut gitlab = Gitlab::init_from_env_vars();
 
 
     let (_github_result, _gitlab_result) = join!(
         async {
-            let events = github.get_events().await;
-            github.insert_github_events_into_db(events).await;
+            github.update_provider().await;
         },
         async {
-            let events = gitlab
-                .get_events(
-                    (OffsetDateTime::now_utc() + Duration::days(-90)).date(), // TODO: Remove magic number
-                    (OffsetDateTime::now_utc()).date(),
-                )
-                .await;
-            gitlab.insert_gitlab_events_into_db(events).await;
+            gitlab.update_provider().await;
         }
     );
+}
+
+
+fn fetch_git_providers_cron(name: &str) {
+    println!("{}: It's time!", name);
+    //fetch_data_from_git_providers().await;
 }
 
 #[get("/health")]
@@ -86,7 +85,7 @@ fn rocket() -> _ {
     env_logger::init();
 
     // Setup cronjobs
-    let mut cron = CronJob::new("Test Cron", on_cron);
+    let mut cron = CronJob::new("Test Cron", fetch_git_providers_cron);
     // Set seconds.
     cron.seconds("0");
     // Start the cronjob.
@@ -100,7 +99,3 @@ fn rocket() -> _ {
         .mount("/api/v1", routes![force_sync, get_git_events])
 }
 
-// Our cronjob handler.
-fn on_cron(name: &str) {
-    println!("{}: It's time!", name);
-}

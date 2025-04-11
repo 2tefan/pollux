@@ -176,6 +176,13 @@ impl GitPlatform for Github {
             current_page += 1;
         }
     }
+
+    async fn update_provider(&mut self) -> Option<i32> {
+        let events = self.get_events().await;
+        let new_events = self.insert_github_events_into_db(events).await;
+
+        Some(new_events)
+    }
 }
 
 impl Github {
@@ -209,7 +216,7 @@ impl Github {
         None
     }
 
-    pub async fn insert_github_events_into_db(&self, events: Vec<GithubEvent>) {
+    pub async fn insert_github_events_into_db(&self, events: Vec<GithubEvent>) -> i32 {
         let db = database::Database::get_or_init().await;
         let pool = db.get_pool().await;
 
@@ -288,6 +295,7 @@ impl Github {
         Github::update_last_sync_timestamp(tx_ref).await;
         tx.commit().await.expect("Couldn't apply transaction ._.");
         info!("Inserted {} new Github events from {} total events into DB", added_events, total_events);
+        added_events
     }
 }
 

@@ -32,6 +32,8 @@ pub trait GitPlatform {
 
     fn init_from_env_vars() -> Self;
 
+    async fn update_provider(&mut self) -> Option<i32>;
+
     // pub fn get_or_init() {
     //     GITHUB.get_or_init(|| Self::init_from_env_vars());
     // }
@@ -75,6 +77,20 @@ pub trait GitPlatform {
             .execute(&mut **tx)
             .await
             .unwrap();
+    }
+
+    async fn get_last_sync_timestamp() -> DateTime<Utc> {
+        let db = database::Database::get_or_init().await;
+        let pool = db.get_pool().await;
+
+        let lasy_sync: DateTime<Utc> = sqlx::query_scalar("SELECT lastSync FROM GitPlatforms WHERE name = ?")
+            .bind(Self::GIT_PLATFORM_ID)
+            .fetch_optional(&pool)
+            .await
+            .unwrap()
+            .unwrap();
+
+        lasy_sync
     }
 
     async fn get_git_action_by_name(
@@ -287,7 +303,6 @@ pub trait GitPlatform {
                 AND   gevt.action_fk = gact.id
                 AND   gevt.project_fk = gpro.id
                 ORDER BY evt.timestamp
-                ;
                 "#)
             .fetch_all(&pool)
             .await
