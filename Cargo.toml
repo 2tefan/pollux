@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-chrono = "0.4.38"
+chrono = { version = "0.4.38", features = ["serde"] }
 cronjob = "0.4.17"
 dotenv = "0.15.0"
 dotenv_codegen = "0.15.0"
@@ -16,7 +16,7 @@ rocket = { version = "0.5.1", features = ["json"] }
 serde = "1.0.209"
 serde_derive = "1.0.209"
 serde_json = "1.0.127"
-sqlx = { version = "0.8.2", features = ["runtime-tokio", "tls-native-tls", "mysql"] }
+sqlx = { version = "0.8.2", features = ["runtime-tokio", "tls-native-tls", "mysql", "chrono"] }
 testcontainers = "0.23.1"
 time = "0.3.36"
 tokio = "1.40.0"

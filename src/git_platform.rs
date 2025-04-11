@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use log::trace;
 use rocket::futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
-use sqlx::{MySql, Row, Transaction};
+use sqlx::{prelude::FromRow, MySql, Row, Transaction};
 use time::{format_description, OffsetDateTime};
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -11,6 +11,16 @@ pub struct GitProject {
     pub platform_project_id: u64,
     pub name: String,
     pub url: String,
+}
+
+
+#[derive(Debug, FromRow, Serialize)]
+pub struct GitEvents {
+    timestamp: DateTime<Utc>,
+    project_name: String,
+    action: String,
+    platform: String,
+    url: String
 }
 
 pub trait GitEventAPI {}

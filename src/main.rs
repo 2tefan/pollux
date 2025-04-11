@@ -9,7 +9,7 @@ mod git_platform;
 
 use cronjob::CronJob;
 use dotenv::dotenv;
-use git_platform::GitPlatform;
+use git_platform::{GitEvents, GitPlatform};
 use github::Github;
 use gitlab::Gitlab;
 use rocket::http::{ContentType, Status};
@@ -50,6 +50,13 @@ fn health() -> Json<HealthResponse> {
     Json(HealthResponse { status: "ok" })
 }
 
+#[get("/git-events")]
+async fn get_git_events() -> Json<Vec<GitEvents>> {
+    Json(
+        Gitlab::get_all_git_events().await
+    )
+}
+
 #[get("/force-sync")]
 async fn force_sync() -> (Status, (ContentType, String)) {
     let dev_mode = std::env::var("POLLUX_ENABLE_DEV_MODE");
@@ -88,7 +95,9 @@ fn rocket() -> _ {
     Gitlab::get_or_init();
     Github::get_or_init();
 
-    rocket::build().mount("/", routes![force_sync, health])
+    rocket::build()
+        .mount("/", routes![health])
+        .mount("/api/v1", routes![force_sync, get_git_events])
 }
 
 // Our cronjob handler.

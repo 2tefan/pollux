@@ -1,6 +1,6 @@
 use crate::{
     database,
-    git_platform::{GitEventAPI, GitPlatform},
+    git_platform::{GitEventAPI, GitEvents, GitPlatform},
 };
 
 use std::borrow::BorrowMut;
@@ -303,6 +303,34 @@ impl Gitlab {
             "Inserted {} new Gitlab events from {} total events into DB",
             added_events, total_events
         );
+    }
+
+    pub async fn get_all_git_events() -> Vec<GitEvents> {
+        let db = database::Database::get_or_init().await;
+        let pool = db.get_pool().await;
+
+        sqlx::query_as::<_, GitEvents>(r#"
+                SELECT 
+                    evt.timestamp as timestamp, 
+                    gpro.name as project_name, 
+                    gact.name as action,
+                    gpro.platform as platform,
+                    gpro.url as url
+                FROM 
+                    Events AS evt, 
+                    GitEvents AS gevt,
+                    GitActions AS gact,
+                    GitProjects AS gpro
+                WHERE evt.timestamp > '2025-03-11'
+                AND   evt.id = gevt.id
+                AND   gevt.action_fk = gact.id
+                AND   gevt.project_fk = gpro.id
+                ORDER BY evt.timestamp
+                ;
+                "#)
+            .fetch_all(&pool)
+            .await
+            .unwrap()
     }
 }
 
