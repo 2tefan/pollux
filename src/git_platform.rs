@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use crate::database;
 use log::trace;
 use rocket::futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
@@ -116,10 +117,10 @@ pub trait GitPlatform {
                 AND ge.project_fk = ? \
                 AND ge.action_fk = ?",
         )
-        .bind(datetime.format("%Y-%m-%d %H:%M:%S").to_string())
-        .bind(project_id)
-        .bind(action_id)
-        .fetch_one(&mut **tx);
+            .bind(datetime.format("%Y-%m-%d %H:%M:%S").to_string())
+            .bind(project_id)
+            .bind(action_id)
+            .fetch_one(&mut **tx);
 
         let query_option = Some(result.await.unwrap().try_get("CNT").unwrap());
 
@@ -146,9 +147,9 @@ pub trait GitPlatform {
     ) -> Option<GitProject> {
         let mut rows =
             sqlx::query("SELECT id, platform_project_id, name, url FROM GitProjects WHERE platform_project_id = ? AND platform = ?")
-                .bind(platform_project_id)
-                .bind(Self::GIT_PLATFORM_ID)
-                .fetch(&mut **tx);
+            .bind(platform_project_id)
+            .bind(Self::GIT_PLATFORM_ID)
+            .fetch(&mut **tx);
 
         let mut number_of_projects = 0;
         let mut github_project = Option::None;
@@ -186,14 +187,14 @@ pub trait GitPlatform {
 
         let project_id =
             sqlx::query("INSERT INTO GitProjects (platform, platform_project_id, name, url) VALUES ( ?, ?, ?, ? )")
-                .bind(Self::GIT_PLATFORM_ID)
-                .bind(project.id.clone())
-                .bind(project.name.clone())
-                .bind(project.url.clone())
-                .execute(&mut **tx)
-                .await
-                .unwrap()
-                .last_insert_id();
+            .bind(Self::GIT_PLATFORM_ID)
+            .bind(project.id.clone())
+            .bind(project.name.clone())
+            .bind(project.url.clone())
+            .execute(&mut **tx)
+            .await
+            .unwrap()
+            .last_insert_id();
         trace!(
             "Inserted GitProject ({}) id: {}",
             Self::GIT_PLATFORM_ID,
@@ -248,6 +249,34 @@ pub trait GitPlatform {
             .await
             .unwrap()
             .last_insert_id()
+    }
+
+    async fn get_all_git_events() -> Vec<GitEvents> {
+        let db = database::Database::get_or_init().await;
+        let pool = db.get_pool().await;
+
+        sqlx::query_as::<_, GitEvents>(r#"
+                SELECT 
+                    evt.timestamp as timestamp, 
+                    gpro.name as project_name, 
+                    gact.name as action,
+                    gpro.platform as platform,
+                    gpro.url as url
+                FROM 
+                    Events AS evt, 
+                    GitEvents AS gevt,
+                    GitActions AS gact,
+                    GitProjects AS gpro
+                WHERE evt.timestamp > '2025-03-11'
+                AND   evt.id = gevt.id
+                AND   gevt.action_fk = gact.id
+                AND   gevt.project_fk = gpro.id
+                ORDER BY evt.timestamp
+                ;
+                "#)
+            .fetch_all(&pool)
+            .await
+            .unwrap()
     }
 
     // // // TODO

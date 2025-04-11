@@ -59,8 +59,8 @@ impl GitPlatform for Gitlab {
         Gitlab {
             token: std::env::var("GITLAB_API_TOKEN")
                 .expect("Please specify GITLAB_API_TOKEN as env var!"),
-            user_id: std::env::var("GITLAB_USER_ID")
-                .expect("Please specify GITLAB_USER_ID as env var!"),
+                user_id: std::env::var("GITLAB_USER_ID")
+                    .expect("Please specify GITLAB_USER_ID as env var!"),
         }
     }
 
@@ -215,14 +215,14 @@ impl Gitlab {
         let gitlab_project = gitlab_project_future.await;
         let project_id =
             sqlx::query("INSERT INTO GitProjects (platform, platform_project_id, name, url) VALUES ( ?, ?, ?, ? )")
-                .bind(Self::GIT_PLATFORM_ID)
-                .bind(gitlab_project.id)
-                .bind(gitlab_project.name_with_namespace)
-                .bind(gitlab_project.web_url)
-                .execute(&mut **tx)
-                .await
-                .unwrap()
-                .last_insert_id();
+            .bind(Self::GIT_PLATFORM_ID)
+            .bind(gitlab_project.id)
+            .bind(gitlab_project.name_with_namespace)
+            .bind(gitlab_project.web_url)
+            .execute(&mut **tx)
+            .await
+            .unwrap()
+            .last_insert_id();
         trace!("Inserted GitProject (Gitlab) id: {}", project_id);
         project_id
     }
@@ -253,7 +253,7 @@ impl Gitlab {
                     error!(
                         "Couldn't parse date from Gitlab using a relaxed form of RFC3339. \
                     Event will be skipped! Received 'created_at' value: {} - error msg: {}",
-                        event.created_at, err
+                    event.created_at, err
                     );
                     continue;
                 }
@@ -303,34 +303,6 @@ impl Gitlab {
             "Inserted {} new Gitlab events from {} total events into DB",
             added_events, total_events
         );
-    }
-
-    pub async fn get_all_git_events() -> Vec<GitEvents> {
-        let db = database::Database::get_or_init().await;
-        let pool = db.get_pool().await;
-
-        sqlx::query_as::<_, GitEvents>(r#"
-                SELECT 
-                    evt.timestamp as timestamp, 
-                    gpro.name as project_name, 
-                    gact.name as action,
-                    gpro.platform as platform,
-                    gpro.url as url
-                FROM 
-                    Events AS evt, 
-                    GitEvents AS gevt,
-                    GitActions AS gact,
-                    GitProjects AS gpro
-                WHERE evt.timestamp > '2025-03-11'
-                AND   evt.id = gevt.id
-                AND   gevt.action_fk = gact.id
-                AND   gevt.project_fk = gpro.id
-                ORDER BY evt.timestamp
-                ;
-                "#)
-            .fetch_all(&pool)
-            .await
-            .unwrap()
     }
 }
 
