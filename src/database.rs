@@ -1,6 +1,12 @@
 
-use sqlx::{MySql, Pool};
+use std::time::Duration;
+
+use log::{error, warn};
+use sqlx::{mysql::{MySqlConnectOptions, MySqlPoolOptions}, MySql, MySqlPool, Pool};
 use tokio::sync::OnceCell;
+
+static FALLBACK_DB_RETRIES: i32 = 16;
+static FALLBACK_MYSQL_PORT: u16 = 3306;
 
 pub static DATABASE: OnceCell<Database> = OnceCell::const_new();
 pub(crate) struct Database {
@@ -9,23 +15,7 @@ pub(crate) struct Database {
 
 impl Database {
     pub async fn init_from_env_vars() -> Database {
-        let db_user = std::env::var("MYSQL_USER").expect("Please specify MYSQL_USER as env var!");
-        let db_password =
-            std::env::var("MYSQL_PASSWORD").expect("Please specify MYSQL_PASSWORD as env var!");
-        let db_host = std::env::var("MYSQL_HOST").expect("Please specify MYSQL_HOST as env var!");
-        let db_port = std::env::var("MYSQL_PORT").expect("Please specify MYSQL_PORT as env var!");
-        let db_target_database =
-            std::env::var("MYSQL_DATABASE").expect("Please specify MYSQL_DATABASE as env var!");
-
-        let pool = sqlx::MySqlPool::connect(
-            format!(
-                "mysql://{}:{}@{}:{}/{}",
-                db_user, db_password, db_host, db_port, db_target_database
-            )
-            .as_str(),
-        )
-        .await
-        .unwrap();
+        let pool = Database::connect_with_retries().await;
 
         debug!("Running DB migrations!");
         match sqlx::migrate!().run(&pool).await {
@@ -34,6 +24,52 @@ impl Database {
         }
 
         Database { pool }
+    }
+
+
+    async fn connect_with_retries() -> MySqlPool {
+        let db_user = std::env::var("MYSQL_USER").expect("Please specify MYSQL_USER as env var!");
+        let db_password =
+            std::env::var("MYSQL_PASSWORD").expect("Please specify MYSQL_PASSWORD as env var!");
+        let db_host = std::env::var("MYSQL_HOST").expect("Please specify MYSQL_HOST as env var!");
+        let db_port = match std::env::var("MYSQL_PORT").expect("Please specify MYSQL_PORT as env var!").parse::<u16>() {
+            Ok(result) => result,
+            Err(err) => {
+                error!("MYSQL_PORT is not a valid u16, falling back to {}: {}", FALLBACK_MYSQL_PORT, err);
+                FALLBACK_MYSQL_PORT
+            }
+        };
+        let db_target_database =
+            std::env::var("MYSQL_DATABASE").expect("Please specify MYSQL_DATABASE as env var!");
+
+
+        let max_retries =
+            match std::env::var("POLLUX_DB_RETRIES").unwrap_or(FALLBACK_DB_RETRIES.to_string()).parse::<i32>() {
+                Ok(result) => result,
+                Err(err) => {
+                    warn!("Unable to parse POLLUX_DB_RETRIES, using »{}« as a fallback: {}", FALLBACK_DB_RETRIES, err);
+                    FALLBACK_DB_RETRIES
+                }};
+        let mut delay = 125;
+
+        info!("Connecting to {}@{}:{}/{}", db_user, db_host, db_port, db_target_database);
+
+        for attempt in 1..=max_retries {
+            let connect_options = MySqlConnectOptions::new().host(&db_host).port(db_port).username(&db_user).password(&db_password).database(&db_target_database);
+            match MySqlPoolOptions::new().acquire_timeout(Duration::from_millis(delay)).connect_with(connect_options).await {
+                Ok(pool) => return pool,
+                Err(err) if attempt < max_retries => {
+                    error!("Attempt {}/{}: Failed to connect to DB: {}", attempt, max_retries, err);
+                    //sleep(Duration::from_millis(delay)).await;
+                    delay *= 2;
+                }
+                Err(err) => {
+                    panic!("Failed to connect to DB after {} attempts: {}", max_retries, err);
+                }
+            }
+        }
+
+        unreachable!("Retry logic should have either returned or panicked");
     }
 
     pub async fn get_or_init() -> &'static Database {
