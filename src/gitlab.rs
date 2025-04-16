@@ -3,16 +3,16 @@ use crate::{
     git_platform::{GitEventAPI, GitPlatform},
 };
 
-use std::borrow::BorrowMut;
+use std::{borrow::BorrowMut, sync::Arc};
 
-use chrono::{DateTime, Datelike, Utc};
+use chrono::{DateTime, Utc};
 use log::{error, log_enabled, trace, warn, Level};
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use sqlx::{MySql, Transaction};
-use time::{Date, Duration, OffsetDateTime};
+use tokio::sync::Mutex;
 
-static GITLAB: OnceCell<Gitlab> = OnceCell::new();
+static GITLAB: OnceCell<Arc<Mutex<Gitlab>>> = OnceCell::new();
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GitlabEvent {
@@ -74,6 +74,7 @@ impl GitPlatform for Gitlab {
     }
 
     async fn update_provider(&mut self) -> Option<i32> {
+        info!("Updating events from Gitlab...");
         let events = self.get_events().await;
         let new_events = self.insert_gitlab_events_into_db(events).await;
 
@@ -82,8 +83,8 @@ impl GitPlatform for Gitlab {
 }
 
 impl Gitlab {
-    pub fn get_or_init() {
-        GITLAB.get_or_init(|| Self::init_from_env_vars());
+    pub fn get_or_init() -> Arc<Mutex<Gitlab>>{
+        GITLAB.get_or_init(|| Arc::new(Mutex::new(Self::init_from_env_vars()))).clone()
     }
 
     pub async fn get_events(&self, after: DateTime<Utc>, before: DateTime<Utc>) -> Vec<GitlabEvent> {
@@ -329,7 +330,7 @@ impl Gitlab {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{NaiveDate, TimeZone};
+    use chrono::TimeZone;
     use dotenv::dotenv;
 
     #[tokio::test]

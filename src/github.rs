@@ -1,9 +1,10 @@
+use std::sync::Arc;
+
 use crate::{
     database,
     git_platform::{GitEventAPI, GitPlatform, GitProject},
 };
 
-use std::borrow::BorrowMut;
 
 use chrono::{DateTime, Utc};
 use log::{error, log_enabled, Level};
@@ -13,8 +14,9 @@ use reqwest::{
     StatusCode,
 };
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 
-static GITHUB: OnceCell<Github> = OnceCell::new();
+static GITHUB: OnceCell<Arc<Mutex<Github>>> = OnceCell::new();
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GithubEvent {
@@ -133,7 +135,7 @@ impl GitPlatform for Github {
                 ),
             };
 
-            github_events.append(data.borrow_mut());
+            github_events.append(&mut data);
 
             if let Some(etag) = header.get("etag") {
                 //headers.append(IF_NONE_MATCH, etag.clone());
@@ -178,6 +180,7 @@ impl GitPlatform for Github {
     }
 
     async fn update_provider(&mut self) -> Option<i32> {
+        info!("Updating events from Github...");
         let events = self.get_events().await;
         let new_events = self.insert_github_events_into_db(events).await;
 
@@ -186,8 +189,8 @@ impl GitPlatform for Github {
 }
 
 impl Github {
-    pub fn get_or_init() {
-        GITHUB.get_or_init(|| Self::init_from_env_vars());
+    pub fn get_or_init() -> Arc<Mutex<Github>>{
+        GITHUB.get_or_init(|| Arc::new(Mutex::new(Self::init_from_env_vars()))).clone()
     }
 
     // Parse header like:
@@ -226,7 +229,7 @@ impl Github {
 
         // Starting transaction 💪
         let mut tx = pool.begin().await.expect("Couldn't start transaction!");
-        let tx_ref = tx.borrow_mut();
+        let tx_ref = &mut tx;
 
         for event in events.iter() {
             total_events += 1;
@@ -264,17 +267,19 @@ impl Github {
             let action_name = match Github::map_action_name(event.type_of_action.as_str()) {
                 Some(value) => value,
                 None => {
-                    warn!("Skipping event - because type of action is unknown! {:#?}", event);
+                    warn!(
+                        "Skipping event - because type of action is unknown! {:#?}",
+                        event
+                    );
                     continue;
                 }
             };
 
             // TODO: Handle push_data (multiple commits!)
-            let action_id =
-                match Github::get_git_action_by_name(tx_ref, action_name).await {
-                    Some(value) => value,
-                    None => Github::insert_git_action(tx_ref, action_name).await,
-                };
+            let action_id = match Github::get_git_action_by_name(tx_ref, action_name).await {
+                Some(value) => value,
+                None => Github::insert_git_action(tx_ref, action_name).await,
+            };
 
             if Github::count_all_matching_events(tx_ref, &datetime, &action_id, &project_id).await
                 > 0
@@ -294,7 +299,10 @@ impl Github {
 
         Github::update_last_sync_timestamp(tx_ref).await;
         tx.commit().await.expect("Couldn't apply transaction ._.");
-        info!("Inserted {} new Github events from {} total events into DB", added_events, total_events);
+        info!(
+            "Inserted {} new Github events from {} total events into DB",
+            added_events, total_events
+        );
         added_events
     }
 }

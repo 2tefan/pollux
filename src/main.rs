@@ -25,14 +25,16 @@ struct HealthResponse {
 }
 
 async fn fetch_data_from_git_providers() {
-    let mut github = Github::init_from_env_vars();
-    let mut gitlab = Gitlab::init_from_env_vars();
+    let github_arc = Github::get_or_init();
+    let gitlab_arc = Gitlab::get_or_init();
 
     let (_github_result, _gitlab_result) = join!(
         async {
+            let mut github = github_arc.lock().await;
             github.update_provider().await;
         },
         async {
+            let mut gitlab = gitlab_arc.lock().await;
             gitlab.update_provider().await;
         }
     );
@@ -64,11 +66,12 @@ async fn force_sync() -> (Status, (ContentType, String)) {
 
 async fn run_cron_job() {
     loop {
-        sleep(Duration::new(1, 0)).await;
         info!("Crontime ✨");
 
         // Run the actual fetching
-        //fetch_data_from_git_providers().await;
+        fetch_data_from_git_providers().await;
+
+        sleep(Duration::new(60, 0)).await;
     }
 }
 
