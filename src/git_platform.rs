@@ -1,9 +1,10 @@
-use chrono::{DateTime, NaiveDate, Utc};
 use crate::database;
+use chrono::{DateTime, NaiveDate, Utc};
 use log::trace;
 use rocket::futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use sqlx::{prelude::FromRow, MySql, Row, Transaction};
+use std::{borrow::BorrowMut, sync::Arc};
 use time::{format_description, OffsetDateTime};
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -14,14 +15,13 @@ pub struct GitProject {
     pub url: String,
 }
 
-
 #[derive(Debug, FromRow, Serialize)]
 pub struct GitEvents {
     timestamp: DateTime<Utc>,
     project_name: String,
     action: String,
     platform: String,
-    url: String
+    url: String,
 }
 
 pub trait GitEventAPI {}
@@ -79,18 +79,23 @@ pub trait GitPlatform {
             .unwrap();
     }
 
-    async fn get_last_sync_timestamp() -> DateTime<Utc> {
+    async fn get_last_sync_timestamp() -> Option<DateTime<Utc>> {
         let db = database::Database::get_or_init().await;
         let pool = db.get_pool().await;
 
-        let lasy_sync: DateTime<Utc> = sqlx::query_scalar("SELECT lastSync FROM GitPlatforms WHERE name = ?")
-            .bind(Self::GIT_PLATFORM_ID)
-            .fetch_optional(&pool)
-            .await
-            .unwrap()
-            .unwrap();
+        // Starting transaction 💪
+        let mut tx = pool.begin().await.expect("Couldn't start transaction!");
+        let tx_ref = tx.borrow_mut();
+        Self::set_platform(tx_ref).await; // TODO: Only do this at initial setup
 
-        lasy_sync
+        match sqlx::query_scalar("SELECT lastSync FROM GitPlatforms WHERE name = ?")
+            .bind(Self::GIT_PLATFORM_ID)
+            .fetch_optional(&mut **tx_ref)
+            .await {
+                Ok(result) => result,
+                Err(_) => None
+
+            }
     }
 
     async fn get_git_action_by_name(
@@ -133,10 +138,10 @@ pub trait GitPlatform {
                 AND ge.project_fk = ? \
                 AND ge.action_fk = ?",
         )
-            .bind(datetime.format("%Y-%m-%d %H:%M:%S").to_string())
-            .bind(project_id)
-            .bind(action_id)
-            .fetch_one(&mut **tx);
+        .bind(datetime.format("%Y-%m-%d %H:%M:%S").to_string())
+        .bind(project_id)
+        .bind(action_id)
+        .fetch_one(&mut **tx);
 
         let query_option = Some(result.await.unwrap().try_get("CNT").unwrap());
 
@@ -199,8 +204,6 @@ pub trait GitPlatform {
         tx: &mut Transaction<'static, MySql>,
         project: &GitProject,
     ) -> u64 {
-        Self::set_platform(tx).await; // TODO: Only do this at initial setup
-
         let project_id =
             sqlx::query("INSERT INTO GitProjects (platform, platform_project_id, name, url) VALUES ( ?, ?, ?, ? )")
             .bind(Self::GIT_PLATFORM_ID)
@@ -267,7 +270,6 @@ pub trait GitPlatform {
             .last_insert_id()
     }
 
-
     fn map_action_name(input: &str) -> Option<&str> {
         match input {
             "pushed to" | "pushed new" | "PushEvent" | "CreateEvent" => Some("commit"),
@@ -277,16 +279,16 @@ pub trait GitPlatform {
             _ => {
                 warn!("Action name not known! {} - pls open a issue, so this action name can be added! Will just use string as is for now...", input);
                 None
-            },
+            }
         }
     }
-
 
     async fn get_all_git_events(since: NaiveDate) -> Vec<GitEvents> {
         let db = database::Database::get_or_init().await;
         let pool = db.get_pool().await;
 
-        sqlx::query_as::<_, GitEvents>(r#"
+        sqlx::query_as::<_, GitEvents>(
+            r#"
                 SELECT 
                     evt.timestamp as timestamp, 
                     gpro.name as project_name, 
@@ -303,11 +305,12 @@ pub trait GitPlatform {
                 AND   gevt.action_fk = gact.id
                 AND   gevt.project_fk = gpro.id
                 ORDER BY evt.timestamp
-                "#)
-            .bind(since.to_owned())
-            .fetch_all(&pool)
-            .await
-            .unwrap()
+                "#,
+        )
+        .bind(since.to_owned())
+        .fetch_all(&pool)
+        .await
+        .unwrap()
     }
 
     // // // TODO

@@ -65,10 +65,15 @@ impl GitPlatform for Gitlab {
     }
 
     async fn get_events(&mut self) -> Vec<Self::GitEventAPI> {
-        let last_sync = Gitlab::get_last_sync_timestamp().await;
+        let before = match Gitlab::get_last_sync_timestamp().await {
+            Some(value) => value,
+            None => {
+                info!("Initial run! Fetching last 90 days from Gitlab...");
+                Utc::now() - chrono::Duration::days(90)
+            }};
         Gitlab::get_events(
             &self, 
-            last_sync,
+            before,
             Utc::now()
         ).await
     }
@@ -219,12 +224,17 @@ impl Gitlab {
         &self,
         tx: &mut Transaction<'static, MySql>,
         project_id: u64,
-    ) -> u64 {
+    ) -> Result<u64, String> {
         let gitlab_project_future = self.get_project_details_by_id(project_id);
 
         Gitlab::set_platform(tx).await; // TODO: Only do this at initial setup
 
         let gitlab_project = gitlab_project_future.await;
+
+        if gitlab_project.visibility.unwrap() != "public" {
+            return Err("Skipping not public project".to_string());
+        }
+
         let project_id =
             sqlx::query("INSERT INTO GitProjects (platform, platform_project_id, name, url) VALUES ( ?, ?, ?, ? )")
             .bind(Self::GIT_PLATFORM_ID)
@@ -236,7 +246,7 @@ impl Gitlab {
             .unwrap()
             .last_insert_id();
         trace!("Inserted GitProject (Gitlab) id: {}", project_id);
-        project_id
+        Ok(project_id)
     }
 
     pub async fn insert_gitlab_events_into_db(&self, events: Vec<GitlabEvent>) -> i32 {
@@ -250,6 +260,7 @@ impl Gitlab {
         // Starting transaction 💪
         let mut tx = pool.begin().await.expect("Couldn't start transaction!");
         let tx_ref = tx.borrow_mut();
+        Self::set_platform(tx_ref).await; // TODO: Only do this at initial setup
 
         for event in events.iter() {
             total_events += 1;
@@ -275,8 +286,14 @@ impl Gitlab {
             let project_id = if let Some(project) = gitlab_project_option_future.await {
                 project.id
             } else {
-                self.fetch_project_from_gitlab_and_write_to_db(tx_ref, event.project_id)
-                    .await
+                match self.fetch_project_from_gitlab_and_write_to_db(tx_ref, event.project_id)
+                    .await {
+                        Ok(result) => result,
+                        Err(err) => {
+                            debug!("Skipping event: {}", err);
+                            continue;
+                        }
+                    }
             };
 
             let action_name = match Gitlab::map_action_name(event.action_name.as_str()) {

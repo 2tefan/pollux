@@ -230,6 +230,7 @@ impl Github {
         // Starting transaction 💪
         let mut tx = pool.begin().await.expect("Couldn't start transaction!");
         let tx_ref = &mut tx;
+        Self::set_platform(tx_ref).await; // TODO: Only do this at initial setup
 
         for event in events.iter() {
             total_events += 1;
