@@ -6,8 +6,10 @@ mod git_platform;
 mod github;
 mod gitlab;
 
+
 use std::time::Duration;
 
+use chrono::{NaiveDate, Utc};
 use dotenv::dotenv;
 use git_platform::{GitEvents, GitPlatform};
 use github::Github;
@@ -16,6 +18,7 @@ use log::info;
 use rocket::http::{ContentType, Status};
 use rocket::serde::json::Json;
 use serde::Serialize;
+use time::macros::date;
 use tokio::join;
 use tokio::time::sleep;
 
@@ -45,9 +48,28 @@ fn health() -> Json<HealthResponse> {
     Json(HealthResponse { status: "ok" })
 }
 
-#[get("/git-events")]
-async fn get_git_events() -> Json<Vec<GitEvents>> {
-    Json(Gitlab::get_all_git_events().await)
+#[get("/git-events?<since..>")]
+async fn get_git_events(since: Option<&str>) -> Json<Vec<GitEvents>> {
+    let date = match since {
+        Some(input) => {
+            match NaiveDate::parse_from_str(input, "%Y-%m-%d") {
+                Ok(result) => result,
+                Err(err) => {
+                    warn!("Couldn't parse {} as a date. Falling back to last 30 days: {}", input, err);
+                    (Utc::now() - chrono::Duration::days(30)).date_naive()
+                }
+            }
+        }
+        None => 
+        {
+            debug!("Using default of 30 days...");
+            (Utc::now() - chrono::Duration::days(30)).date_naive()
+        }
+    };
+
+    info!("Getting events since {}", date);
+
+    Json(Gitlab::get_all_git_events(date).await)
 }
 
 #[get("/force-sync")]

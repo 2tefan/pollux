@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use crate::database;
 use log::trace;
 use rocket::futures::TryStreamExt;
@@ -282,7 +282,7 @@ pub trait GitPlatform {
     }
 
 
-    async fn get_all_git_events() -> Vec<GitEvents> {
+    async fn get_all_git_events(since: NaiveDate) -> Vec<GitEvents> {
         let db = database::Database::get_or_init().await;
         let pool = db.get_pool().await;
 
@@ -298,12 +298,13 @@ pub trait GitPlatform {
                     GitEvents AS gevt,
                     GitActions AS gact,
                     GitProjects AS gpro
-                WHERE evt.timestamp > '2025-03-11'
+                WHERE evt.timestamp > ?
                 AND   evt.id = gevt.id
                 AND   gevt.action_fk = gact.id
                 AND   gevt.project_fk = gpro.id
                 ORDER BY evt.timestamp
                 "#)
+            .bind(since.to_owned())
             .fetch_all(&pool)
             .await
             .unwrap()
