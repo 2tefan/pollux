@@ -1,5 +1,5 @@
 
-use std::time::Duration;
+use std::{thread::sleep, time::{Duration, Instant}};
 
 use log::{error, warn};
 use sqlx::{mysql::{MySqlConnectOptions, MySqlPoolOptions}, MySql, MySqlPool, Pool};
@@ -55,12 +55,20 @@ impl Database {
         info!("Connecting to {}@{}:{}/{}", db_user, db_host, db_port, db_target_database);
 
         for attempt in 1..=max_retries {
+            let now = Instant::now();
             let connect_options = MySqlConnectOptions::new().host(&db_host).port(db_port).username(&db_user).password(&db_password).database(&db_target_database);
             match MySqlPoolOptions::new().acquire_timeout(Duration::from_millis(delay)).connect_with(connect_options).await {
                 Ok(pool) => return pool,
                 Err(err) if attempt < max_retries => {
                     error!("Attempt {}/{}: Failed to connect to DB: {}", attempt, max_retries, err);
-                    //sleep(Duration::from_millis(delay)).await;
+
+                    let elapsed = now.elapsed();
+                    let target_delay = Duration::from_millis(delay);
+                    if elapsed < target_delay  {
+                        let delta = target_delay - elapsed;
+                        sleep(delta);
+                    }
+
                     delay *= 2;
                 }
                 Err(err) => {
