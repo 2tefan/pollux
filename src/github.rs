@@ -14,6 +14,7 @@ use reqwest::{
     StatusCode,
 };
 use serde::{Deserialize, Serialize};
+use sqlx::{MySql, Transaction};
 use tokio::sync::Mutex;
 
 static GITHUB: OnceCell<Arc<Mutex<Github>>> = OnceCell::new();
@@ -43,6 +44,11 @@ pub struct GithubProject {
     pub platform_project_id: u64,
     pub name: String,
     pub url: String,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GithubRepoApiInfo {
+    pub html_url: String,
 }
 
 #[derive(Debug)]
@@ -82,10 +88,7 @@ impl GitPlatform for Github {
             url, events_per_page_parameter, current_page
         ));
 
-        let mut headers = HeaderMap::new();
-        headers.insert(ACCEPT, "application/vnd.github+json".parse().unwrap());
-        headers.insert(USER_AGENT, "2tefan-pollux".parse().unwrap());
-        headers.insert("X-GitHub-Api-Version", "2022-11-28".parse().unwrap());
+        let mut headers = Github::get_default_headers();
 
         loop {
             let mut using_etag = false;
@@ -193,6 +196,14 @@ impl Github {
         GITHUB.get_or_init(|| Arc::new(Mutex::new(Self::init_from_env_vars()))).clone()
     }
 
+    fn get_default_headers() -> HeaderMap{
+        let mut headers = HeaderMap::new();
+        headers.insert(ACCEPT, "application/vnd.github+json".parse().unwrap());
+        headers.insert(USER_AGENT, "2tefan-pollux".parse().unwrap());
+        headers.insert("X-GitHub-Api-Version", "2022-11-28".parse().unwrap());
+        headers
+    }
+
     // Parse header like:
     // < link: <https://api.github.com/user/26086452/events?per_page=2&page=2>; rel="next", <https://api.github.com/user/26086452/events?per_page=2&page=6>; rel="last"
     fn parse_header_for_next_page(header: String) -> Option<String> {
@@ -253,16 +264,13 @@ impl Github {
             let project_id = if let Some(project) = github_project_option_future.await {
                 project.id
             } else {
-                self.write_project_to_db(
-                    tx_ref,
-                    &GitProject {
-                        id: event.repo.id, // This is kinda cheating... Pls fix
-                        platform_project_id: event.repo.id,
-                        name: event.repo.name.clone(),
-                        url: event.repo.url.clone(),
-                    },
-                )
-                .await
+                match self.fetch_project_from_github_and_write_to_db(tx_ref, event).await {
+                    Ok(value) => value,
+                    Err(err) => {
+                        error!("Unable to add project from github and write it to db. Will just continue... {}", err);
+                        continue;
+                    }
+                }
             };
 
             let action_name = match Github::map_action_name(event.type_of_action.as_str()) {
@@ -305,6 +313,73 @@ impl Github {
             added_events, total_events
         );
         added_events
+    }
+
+    async fn fetch_project_from_github_and_write_to_db(
+        &self,
+        tx: &mut Transaction<'static, MySql>,
+        github_event: &GithubEvent,
+    ) -> Result<u64, String> {
+        let project_url_future = self.get_project_url(&github_event.repo.url);
+
+        //Gitlab::set_platform(tx).await; // TODO: Only do this at initial setup
+
+        let project_url = match project_url_future.await {
+            Some(value) => value,
+            None => {
+                return Err(format!("Unable to fetch project url of Github Project {}", github_event.repo.name));
+            }
+        };
+
+        // if github_project.visibility.unwrap() != "public" {
+        //     return Err("Skipping not public project".to_string());
+        // }
+
+        let project_id = self.write_project_to_db(
+            tx,
+            &GitProject {
+                id: github_event.repo.id, // This is kinda cheating... Pls fix
+                platform_project_id: github_event.repo.id,
+                name: github_event.repo.name.clone(),
+                url: project_url
+            },
+        )
+        .await;
+        Ok(project_id)
+    }
+
+    pub async fn get_project_url(&self, api_url: &str) -> Option<String> {
+        let client = reqwest::Client::new();
+        let headers = Github::get_default_headers();
+
+        info!("Getting project info from Github... ({})", api_url);
+        let res = client.get(api_url).headers(headers).send().await;
+
+        let initial_res = match res {
+            Ok(initial_response) => initial_response,
+            Err(err) => {
+                error!("Unable to get response from Github regarding project info! {}", err);
+                return None;
+            }
+        };
+
+        let payload = match initial_res.text().await {
+            Ok(text) => text,
+            Err(err) => {
+                error!("Unable to decode response from Gitlab: {}", err);
+                return None;
+            }
+        };
+
+        let json: GithubRepoApiInfo = match serde_json::from_str(&payload) {
+            Ok(data) => data,
+            Err(err) => panic!(
+                "Unable to decode json response from Github: {}\nThis is what we received:\n{}",
+                err, payload
+            ),
+        };
+
+        Some(json.html_url)
     }
 }
 
