@@ -1,4 +1,4 @@
-FROM docker.io/rust:1-alpine3.20@sha256:838d384a1138fe1f2e448e3901bb3d23683570ba3dca581160880ffad760332b AS build
+FROM docker.io/rust:1.86.0-alpine AS build
 
 ## cargo package name: customize here or provide via --build-arg
 ARG pkg=pollux
