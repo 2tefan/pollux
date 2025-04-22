@@ -19,5 +19,5 @@ sqlx = { version = "0.8.2", features = ["runtime-tokio", "tls-native-tls", "mysq
 testcontainers = "0.23.1"
 time = "0.3.36"
 tokio = "1.40.0"
-openssl-sys = { version = "*", features = ["vendored"] }
+openssl-sys = { version = "0.9.107", features = ["vendored"] }
 
