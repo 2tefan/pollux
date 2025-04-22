@@ -1,4 +1,4 @@
-FROM docker.io/rust:1.86.0-alpine AS build
+FROM docker.io/rust:1.86.0-alpine@sha256:541a1720c1cedddae9e17b4214075bf57c20bc7b176b4bba6bce3437c44d51ef AS build
 
 ## cargo package name: customize here or provide via --build-arg
 ARG pkg=pollux
@@ -32,7 +32,7 @@ RUN --mount=type=cache,target=/build/target \
 
 ################################################################################
 
-FROM alpine:3.21.3
+FROM alpine:3.21.3@sha256:a8560b36e8b8210634f77d9f7f9efd7ffa463e380b75e2e74aff4511df3ef88c
 
 WORKDIR /app
 
