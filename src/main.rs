@@ -18,7 +18,6 @@ use log::info;
 use rocket::http::{ContentType, Status};
 use rocket::serde::json::Json;
 use serde::Serialize;
-use time::macros::date;
 use tokio::join;
 use tokio::time::sleep;
 
@@ -87,13 +86,19 @@ async fn force_sync() -> (Status, (ContentType, String)) {
 }
 
 async fn run_cron_job() {
+    let resync_timeout_hours = match std::env::var("POLLUX_RESYNC_TIMEOUT_HOURS").expect("Please specify POLLUX_RESYNC_TIMEOUT_HOURS as env var!").parse::<u64>() {
+        Ok(result) => result,
+        Err(err) => {
+            panic!("POLLUX_RESYNC_TIMEOUT_HOURS is not a valid u64! Please set it to a valid positive integer: {}", err);
+        }
+    };
     loop {
         info!("Crontime ✨");
 
         // Run the actual fetching
         fetch_data_from_git_providers().await;
 
-        sleep(Duration::new(60, 0)).await;
+        sleep(Duration::new(resync_timeout_hours * 3600, 0)).await;
     }
 }
 
