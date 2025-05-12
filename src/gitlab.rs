@@ -73,8 +73,8 @@ impl GitPlatform for Gitlab {
             }};
         Gitlab::get_events(
             &self, 
-            before,
-            Utc::now()
+            before - chrono::Duration::days(1),
+            Utc::now() + chrono::Duration::days(1)
         ).await
     }
 
